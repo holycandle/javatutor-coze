@@ -1,0 +1,67 @@
+{
+  "source_code": "public class BubbleSort {\n    public static void bubbleSort(int[] arr) {\n        int n = arr.length;\n        for (int i = 0; i < n - 1; i++) {\n            for (int j = 0; j < n - i - 1; j++) {\n                if (arr[j] > arr[j + 1]) {\n                    int temp = arr[j];\n                    arr[j] = arr[j + 1];\n                    arr[j + 1] = temp;\n                }\n            }\n        }\n    }\n\n    public static void main(String[] args) {\n        int[] arr = {5, 3, 8, 1};\n        bubbleSort(arr);\n        for (int v : arr) System.out.print(v + \" \");\n    }\n}",
+  "steps": [
+    {
+      "step": 0,
+      "line": 3,
+      "variables": { "n": 4 },
+      "heap": {},
+      "stackFrames": [
+        {
+          "method": "main",
+          "locals": { "arr": "[5, 3, 8, 1]" },
+          "args": {}
+        },
+        {
+          "method": "bubbleSort",
+          "locals": { "arr": "[5, 3, 8, 1]", "n": 4, "i": 0, "j": 0 },
+          "args": { "arr": "[5, 3, 8, 1]" }
+        }
+      ],
+      "output": null
+    },
+    {
+      "step": 1,
+      "line": 7,
+      "variables": { "n": 4, "i": 0, "j": 0, "temp": 5 },
+      "heap": {},
+      "stackFrames": [
+        {
+          "method": "main",
+          "locals": { "arr": "[5, 3, 8, 1]" },
+          "args": {}
+        },
+        {
+          "method": "bubbleSort",
+          "locals": { "arr": "[5, 3, 8, 1]", "n": 4, "i": 0, "j": 0, "temp": 5 },
+          "args": { "arr": "[5, 3, 8, 1]" }
+        }
+      ],
+      "output": null
+    },
+    {
+      "step": 2,
+      "line": 8,
+      "variables": { "n": 4, "i": 0, "j": 1, "arr": "[3, 5, 8, 1]" },
+      "heap": {},
+      "stackFrames": [
+        {
+          "method": "main",
+          "locals": { "arr": "[3, 5, 8, 1]" },
+          "args": {}
+        },
+        {
+          "method": "bubbleSort",
+          "locals": { "arr": "[3, 5, 8, 1]", "n": 4, "i": 0, "j": 1 },
+          "args": { "arr": "[3, 5, 8, 1]" }
+        }
+      ],
+      "output": null
+    }
+  ],
+  "current_step_index": 2,
+  "current_line": 8,
+  "user_question": "为什么 arr[2] 还是 8？",
+  "user_id": "a3f2b1c4-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+  "compile_error": ""
+}
