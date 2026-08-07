@@ -55,7 +55,7 @@ tags: design, architecture, process, app
 - **REQ-006**: 专家回答必须引用真实执行数据（步骤号、行号、变量值），不得凭空推理。
 - **REQ-007**: 必须按 `user_id` 读写长期记忆：学习画像表与对话记录表。
 - **REQ-008**: 记忆加载发生在意图路由之前，记忆写回发生在专家分支之后、最终回复之前。
-- **REQ-009**: `build_agent(ctx=None)` 必须存在，返回值必须暴露 `.builder`，供 `src/main.py` 的 `base.builder.compile(...)` 调用。
+- **REQ-009**: `build_agent(ctx=None)` 必须存在，返回 `AgentBundle` 对象，该对象的 `.builder` 属性为 `StateGraph`（未编译），`.builder.compile(checkpointer=...)` 由 `src/main.py` lifespan 统一调用（见 `main.py` 第 271-272 行）。**禁止使用 `create_agent` 封装**（LangChain 的 `create_agent` 返回值不暴露 `.builder`，会导致平台启动崩溃）。
 - **REQ-010**: 最终输出必须追加一条 assistant 消息，内容为专家回答（`animate` 分支包含 SVG）。
 - **REQ-011**: 意图识别默认使用确定性规则；命中失败时允许 LLM 兜底，但兜底必须可开关。
 
@@ -65,7 +65,7 @@ tags: design, architecture, process, app
 - **CON-002**: 新代码只能放在 `src/agents/`、`src/graphs/`、`src/tools/`、`src/learning/`、`assets/`、`config/`、`tests/`、`docs/`。
 - **CON-003**: Python 版本必须为 3.12（`pyproject.toml` 要求 `>=3.12`，`.coze` 要求 `python-3.12`）。
 - **CON-004**: 依赖管理只用 `uv`，新增依赖写入 `pyproject.toml` 的 `dependencies`，并更新 `uv.lock`。
-- **CON-005**: 禁止 `from src.xxx import ...` 前缀，统一 `from agents.agent import ...`、`from graphs.javatutor.nodes import ...`。
+- **CON-005**: 禁止 `from src.xxx import ...` 前缀，统一 `from agents.agent import ...`、`from graphs.javatutor.nodes import ...`。工具函数命名约定：`build_agent()` 返回 `AgentBundle`，模型获取函数命名为 `_get_chat_model()`。
 - **CON-006**: 模型配置从 `config/agent_llm_config.json` 读取，API Key 与 Base URL 必须来自 `COZE_WORKLOAD_IDENTITY_API_KEY`、`COZE_INTEGRATION_MODEL_BASE_URL`。
 - **CON-007**: 文件名只允许字母、数字、下划线、短横线。
 - **CON-008**: 平台 SDK 版本区间（`coze-coding-utils >=0.2.8,<1`、`coze-coding-dev-sdk >0.5.0,<1` 等）不得改动。
@@ -88,8 +88,8 @@ tags: design, architecture, process, app
 
 - **PAT-001**: LangGraph 节点统一为 `def node_name(state) -> dict`，返回值只包含本次更新的字段。
 - **PAT-002**: 条件路由使用 `add_conditional_edges`，映射表覆盖全部意图。
-- **PAT-003**: 模型可注入：节点支持 `model` 参数或 `configurable.chat_model`，测试使用 FakeModel。
-- **PAT-004**: 新增包内模块保持单一职责：`state.py` 只放状态，`nodes.py` 只放节点，`graph.py` 只放构图。
+- **PAT-003**: 模型可注入：专家节点支持 `model` 参数，测试使用 `FakeModel`；生产环境通过 `_get_chat_model()` 获取（每次调用从 `config/agent_llm_config.json` 读取，LangChain 内部复用连接池）；测试时用 `config={"configurable": {"chat_model": FakeModel()}}` 注入。
+- **PAT-004**: 新增包内模块保持单一职责：`state.py` 只放状态，`nodes.py` 只放节点，`graph.py` 只放构图，`prompts.py` 只放提示词文本。
 
 ## 4. Interfaces & Data Contracts
 
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS learning_records (
 - **AC-002**: 给定含真实 steps 与“为什么 arr 变化”的问题，路由结果必须为 `data_query`。
 - **AC-003**: 给定“生成动画/演示”类问题，输出文本必须包含可渲染的 `<svg ...>...</svg>` 且含 `<animate`。
 - **AC-004**: 给定无 steps 但问概念的问题，路由结果必须为 `concept`，回答不得引用不存在的步骤。
-- **AC-005**: `build_agent(ctx=None)` 返回值 `.builder.compile()` 必须成功，且可用 `{"messages": [...]}` 调用。
+- **AC-005**: `build_agent(ctx=None)` 返回值必须暴露 `.builder` 属性（类型为 `StateGraph`），且 `.builder.compile()` 能成功编译（平台 lifespan 会调用 `.builder.compile(checkpointer=...)`）。
 - **AC-006**: 带 `user_id` 的对话结束后，`user_profiles.total_sessions` 与 `learning_records` 必须新增记录。
 - **AC-007**: 记忆/知识库不可用时，对话仍能完成，最终回复不得包含异常堆栈。
 - **AC-008**: 全部新增代码通过 `uv run pytest`，无跳过、无 xfail。
@@ -278,7 +278,7 @@ CREATE TABLE IF NOT EXISTS learning_records (
 ## 10. Validation Criteria
 
 - `uv run pytest tests/` 全部通过。
-- `python -c "from agents.agent import build_agent; g = build_agent().builder.compile(); print('ok')"` 输出 `ok`。
+- `python -c "from agents.agent import build_agent; b = build_agent(); assert hasattr(b, 'builder'); from graphs.javatutor.graph import build_flow_graph; print('ok')"` 输出 `ok`。（注：`build_agent()` 不在内部调用 `.compile()`，平台 lifespan 统一调用）
 - 本地/Coze 终端执行：`/health` 返回 `status=ok`，`/graph_parameter` 返回非空 JSON，`/v1/chat/completions` 返回 assistant 回答。
 - 上传回 Coze 后，项目预览可正常发起对话（此为最终验收，由人工确认）。
 

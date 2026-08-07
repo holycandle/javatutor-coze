@@ -4,9 +4,43 @@
 
 **Goal:** 在 Coze Vibe Coding 项目内用 Python + LangGraph 实现 JavaTutor 教学智能体：解析 TraceEngine 数据、严格意图路由、专家回答、SVG 动画、知识检索与跨会话记忆。
 
-**Architecture:** 使用自定义 `StateGraph` 表达严格流程：`parse_context -> load_memory -> route_intent -> 五个分支 -> write_memory -> final`。`build_agent(ctx=None)` 返回暴露 `.builder` 的 `AgentBundle`，保持 `src/main.py` 外壳契约不变；模型通过 `configurable.chat_model` 注入以便测试。
+**Architecture:** 使用自定义 `StateGraph` 表达严格流程：`parse_context -> load_memory -> route_intent -> 五个分支 -> write_memory -> final`。**`build_agent(ctx=None)` 返回 `AgentBundle` 对象，该对象的 `.builder` 属性为 `StateGraph`，`.builder.compile(checkpointer=...)` 由 `src/main.py` 的 lifespan 调用。**`configurable.chat_model` 仅用于测试注入 FakeModel；生产环境专家节点通过节点参数 `model=None` 注入。**不得使用 `create_agent` 封装（该函数返回的 Agent 实例不暴露 `.builder`，会导致平台启动崩溃）。**
 
 **Tech Stack:** Python 3.12、LangGraph 1.0、LangChain 1.0、FastAPI（外壳）、pytest、SQLAlchemy（记忆）、Jinja2 风格字符串模板（SVG 生成，不引入新依赖）。
+
+## Critical: `src/agents/agent.py` Architecture
+
+> **平台强制契约（`src/main.py` 第 271-272 行）**:
+> ```python
+> base = graph_helper.get_agent_instance("agents.agent", None)
+> sync_graph = base.builder.compile(checkpointer=checkpointer)
+> ```
+> 因此 `build_agent()` 必须返回包含 `.builder` 的对象，**禁止使用 `create_agent`**（LangChain 的 `create_agent` 返回值无 `.builder`）。
+
+**正确架构**:
+
+```python
+from langgraph.graph import StateGraph
+from storage.memory.memory_saver import get_memory_saver
+
+class AgentBundle:
+    """平台要求的返回值类型，必须包含 .builder 属性"""
+    def __init__(self, builder: StateGraph):
+        self.builder = builder
+
+def build_agent(ctx=None):
+    builder = StateGraph(input_schema=AgentState, output_schema=AgentState)
+    # ... add nodes and edges ...
+    return AgentBundle(builder)
+```
+
+**⚠️ 注意事项**:
+- `build_agent()` 只返回 `AgentBundle`，**不在此处调用 `.compile()`**
+- `.compile(checkpointer=...)` 由 `src/main.py` lifespan 统一调用
+- 生产环境 checkpointer 由平台注入（PostgreSQL），测试时可注入 `MemorySaver`
+- 专家节点的模型通过节点参数 `model=None` 注入，**不要在 `build_agent()` 内硬编码**
+
+---
 
 ## Global Constraints
 
@@ -30,7 +64,7 @@
 | `src/graphs/javatutor/prompts.py` | 四个专家的 `SYSTEM_PROMPTS` |
 | `src/graphs/javatutor/nodes.py` | 全部流程节点：解析、路由、专家、动画、记忆、收尾 |
 | `src/graphs/javatutor/graph.py` | `build_flow_graph()` 构图与条件边 |
-| `src/agents/agent.py` | `build_agent(ctx=None)` 返回 `AgentBundle`（修改） |
+| `src/agents/agent.py` | `build_agent(ctx=None)` 返回 `AgentBundle`（**重写**，`StateGraph` + `AgentBundle` 架构，**禁止使用 `create_agent`**） |
 | `src/learning/animation.py` | 算法分类与 SVG 生成器 |
 | `src/learning/knowledge.py` | 错误速查与 Java 文档检索 |
 | `src/learning/memory.py` | 用户画像与对话记录存储 |
@@ -424,7 +458,7 @@ from graphs.javatutor.prompts import SYSTEM_PROMPTS
 在 `parse_context` 之后追加：
 
 ```python
-def _chat_model():
+def _get_chat_model():
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     with open(os.path.join(workspace_path, "config/agent_llm_config.json"), encoding="utf-8") as f:
         cfg = json.load(f)
@@ -474,7 +508,7 @@ def _build_expert_messages(state, expert):
 def _run_expert(state, expert, model=None):
     if model is None:
         config = get_runnable_config()
-        model = config.get("configurable", {}).get("chat_model") or _chat_model()
+        model = config.get("configurable", {}).get("chat_model") or _get_chat_model()
     response = model.invoke(_build_expert_messages(state, expert))
     return {"answer": response.content}
 
@@ -967,6 +1001,9 @@ git commit -m "feat: add user memory store backed by SQLAlchemy"
 在 `src/graphs/javatutor/nodes.py` 末尾追加：
 
 ```python
+from langgraph.graph import add_nodes
+
+
 def load_memory(state):
     user_id = state.get("user_id", "")
     if not user_id:
@@ -1032,7 +1069,16 @@ def build_final(state):
 
     answer = state.get("answer", "") or "抱歉，我暂时无法回答这个问题。"
     return {"messages": [AIMessage(content=answer)]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 工具函数：获取聊天模型（每次调用新建实例，LangChain 内部复用连接池）
+# ⚠️ 该函数已在 Task 3 的 nodes.py 中定义，此处引用是为了与 Step 1 的节点代码分离说明。
+# 实际实现中 nodes.py 只需在 Task 3 末尾追加一次，Task 7 无需重复定义。
+# ─────────────────────────────────────────────────────────────────────────────
 ```
+
+> **⚠️ 关于 `_get_chat_model`**: 每次专家节点调用时执行，每次都读 `config/`。这是**预期行为**，确保配置热加载。`langchain_openai.ChatOpenAI` 内部持有连接池，不会每次创建新 TCP 连接。测试时用 `model=FakeModel(...)` 参数注入。
 
 - [ ] **Step 2: 创建构图模块**
 
@@ -1092,6 +1138,8 @@ def build_flow_graph() -> StateGraph:
 
 - [ ] **Step 3: 修改 build_agent**
 
+> **⚠️ Task 3 中专家节点的 `model` 参数注入实现确认**：Task 3 的 `_run_expert` 函数使用 `get_runnable_config()` 获取 `configurable.chat_model`。因此 `test_graph.py` 的测试需要将 FakeModel 注入到 `config["configurable"]["chat_model"]` 中（见下方代码）。
+
 将 `src/agents/agent.py` 整体替换为：
 
 ```python
@@ -1101,11 +1149,13 @@ from graphs.javatutor.graph import build_flow_graph
 
 
 class AgentBundle:
+    """平台要求的返回值包装类，必须包含 .builder 属性（类型为 StateGraph）"""
     def __init__(self, builder: Any):
         self.builder = builder
 
 
 def build_agent(ctx=None):
+    """返回 AgentBundle，.builder.compile(checkpointer) 由 src/main.py lifespan 调用"""
     return AgentBundle(build_flow_graph())
 ```
 
@@ -1129,7 +1179,17 @@ class FakeModel:
         return AIMessage(content="根据第 1 步，arr[1] 从 5 变成了 3。")
 
 
-def test_build_agent_compiles_and_runs_flow():
+def test_build_agent_returns_bundle_with_builder():
+    """验证 build_agent() 返回 AgentBundle，且 .builder 可编译"""
+    agent = build_agent()
+    assert hasattr(agent, "builder"), "build_agent() must return AgentBundle with .builder"
+    # 验证可以编译（不传 checkpointer 用于快速测试）
+    compiled = agent.builder.compile()
+    assert compiled is not None
+
+
+def test_full_flow_with_fake_model():
+    """验证全流程：FakeModel 通过 config['configurable']['chat_model'] 注入"""
     payload = json.loads((FIXTURES / "sample_payload.json").read_text(encoding="utf-8"))
     agent = build_agent()
     graph = agent.builder.compile()
@@ -1138,7 +1198,11 @@ def test_build_agent_compiles_and_runs_flow():
         "user_question": payload["user_question"],
         "user_id": payload["user_id"],
     }
-    result = graph.invoke(state, config={"configurable": {"chat_model": FakeModel()}})
+    # FakeModel 通过 configurable.chat_model 注入（Task 3 _run_expert 使用 get_runnable_config）
+    result = graph.invoke(
+        state,
+        config={"configurable": {"chat_model": FakeModel()}},
+    )
     final = result["messages"][-1]
     assert isinstance(final, AIMessage)
     assert "arr" in final.content
