@@ -89,8 +89,19 @@ def _parse_json_dict(data: dict) -> dict:
     }
 
 
-def _parse_json_str(content: str) -> dict:
-    """解析 JSON 字符串内容."""
+def _parse_json_str(content: str | list) -> dict:
+    """解析 JSON 字符串内容.
+    
+    支持 content 为 str 或 list（Coze 平台可能将消息包装为 list）。
+    """
+    # 处理 list 类型 content（如 Coze 平台包装的 [{"type": "text", "text": "..."}]）
+    if isinstance(content, list):
+        texts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                texts.append(item.get("text", ""))
+        content = "\n".join(texts)
+    
     try:
         data = json.loads(content)
     except json.JSONDecodeError as e:
