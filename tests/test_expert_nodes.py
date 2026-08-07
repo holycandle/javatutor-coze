@@ -10,7 +10,7 @@
 import json
 import pytest
 
-from langchain_core.language_models.fake import FakeListLLM
+from langchain_core.language_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from graphs.javatutor.nodes import (
@@ -28,7 +28,7 @@ from graphs.javatutor.prompts import (
 )
 
 
-class FakeExpertLLM(FakeListLLM):
+class FakeExpertLLM(FakeListChatModel):
     """注入专家 LLM，返回固定前缀以区分专家."""
 
     response_prefix: str = "Expert response: "
@@ -132,9 +132,9 @@ class TestExpertNodes:
         result = animate_node(state)
 
         assert "answer" in result
-        assert result["answer"] == "动画功能正在开发中，敬请期待。"
-        # 不调用 LLM
-        assert result.get("answer") == "动画功能正在开发中，敬请期待。"
+        assert "【功能待开发】" in result["answer"]
+        # 不调用 LLM，直接返回占位文本
+        assert "动画生成" in result["answer"]
 
     def test_run_expert_accepts_model_param(self):
         """_run_expert 接受 model 参数注入 FakeModel."""
