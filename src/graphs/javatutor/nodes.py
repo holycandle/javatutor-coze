@@ -214,13 +214,14 @@ def _run_expert(
     else:
         # 生产模式: 使用 LLMClient
         client, llm_config = _get_chat_model()
-        raw_messages = []
-        for msg in messages:
-            role = "system" if isinstance(msg, SystemMessage) else "user"
-            raw_messages.append({"role": role, "content": msg.content})
-
-        response = client.invoke(llm_config=llm_config, messages=raw_messages)
-        answer = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+        response = client.invoke(
+            messages=messages,
+            model=llm_config.model,
+            temperature=llm_config.temperature or 0.7,
+            top_p=llm_config.top_p or 0.9,
+            max_completion_tokens=llm_config.max_completion_tokens or 10000,
+        )
+        answer = response.content
 
     return {"answer": answer}
 
