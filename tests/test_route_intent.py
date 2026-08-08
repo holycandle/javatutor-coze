@@ -79,3 +79,38 @@ class TestRouteIntent:
         }
         result = route_intent(state)
         assert result["intent"] == "other"
+
+    # ── 显式 intent 测试（Phase 2: analyze 专家） ──
+
+    def test_explicit_intent_analyze(self):
+        """显式 intent: analyze → analyze."""
+        state = {
+            "user_question": "请分析复杂度",
+            "has_error": False,
+            "compile_error": "",
+            "intent": "analyze",
+        }
+        result = route_intent(state)
+        assert result["intent"] == "analyze"
+
+    def test_explicit_intent_overrides_compile_error(self):
+        """显式 intent 优先级高于 compile_error（后端主动指定）."""
+        state = {
+            "user_question": "",
+            "has_error": True,
+            "compile_error": "error: ';' expected",
+            "intent": "analyze",
+        }
+        result = route_intent(state)
+        assert result["intent"] == "analyze"
+
+    def test_explicit_intent_overrides_keyword(self):
+        """显式 intent 覆盖关键词匹配."""
+        state = {
+            "user_question": "为什么 arr[0] 变了",
+            "has_error": False,
+            "compile_error": "",
+            "intent": "concept",
+        }
+        result = route_intent(state)
+        assert result["intent"] == "concept"

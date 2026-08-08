@@ -5,6 +5,7 @@ from typing import Literal
 from langgraph.graph import END, StateGraph
 
 from graphs.javatutor.nodes import (
+    analyze_node,
     animate_node,
     build_final,
     concept_node,
@@ -17,7 +18,7 @@ from graphs.javatutor.nodes import (
 from graphs.javatutor.state import JavaTutorState
 
 
-def _route_to_expert(state: JavaTutorState) -> Literal["data_query", "concept", "debug", "animate", "other"]:
+def _route_to_expert(state: JavaTutorState) -> Literal["data_query", "concept", "debug", "animate", "analyze", "other"]:
     """条件路由: 根据 intent 返回目标专家节点名."""
     intent: str = state.get("intent", "other")
     node_map = {
@@ -25,6 +26,7 @@ def _route_to_expert(state: JavaTutorState) -> Literal["data_query", "concept", 
         "concept": "concept",
         "debug": "debug",
         "animate": "animate",
+        "analyze": "analyze",
         "other": "other",
     }
     return node_map.get(intent, "other")
@@ -58,6 +60,7 @@ def build_flow_graph() -> StateGraph:
     graph.add_node("concept", concept_node)
     graph.add_node("debug", debug_node)
     graph.add_node("animate", animate_node)
+    graph.add_node("analyze", analyze_node)
     graph.add_node("other", other_node)
     graph.add_node("final", build_final)
 
@@ -76,12 +79,13 @@ def build_flow_graph() -> StateGraph:
             "concept": "concept",
             "debug": "debug",
             "animate": "animate",
+            "analyze": "analyze",
             "other": "other",
         },
     )
 
     # 专家节点 → final
-    for node in ["data_query", "concept", "debug", "animate", "other"]:
+    for node in ["data_query", "concept", "debug", "animate", "analyze", "other"]:
         graph.add_edge(node, "final")
 
     # final → 结束

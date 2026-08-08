@@ -4,6 +4,7 @@
 """
 
 import json
+import logging
 import os
 from typing import Literal, Any
 
@@ -22,6 +23,7 @@ from graphs.javatutor.prompts import (
     SYSTEM_PROMPT_DEBUG,
     SYSTEM_PROMPT_ANIMATE,
     SYSTEM_PROMPT_OTHER,
+    SYSTEM_PROMPT_ANALYZE,
 )
 
 # ── 模型配置 ──────────────────────────────────────────────────────────────────
@@ -90,6 +92,7 @@ def _parse_json_dict(data: dict) -> dict:
     user_question = data.get("user_question", "")
     user_id = data.get("user_id", "")
     compile_error = data.get("compile_error", "")
+    intent = data.get("intent", "")
 
     # 提取当前步骤的变量快照
     current_variables = {}
@@ -109,6 +112,7 @@ def _parse_json_dict(data: dict) -> dict:
         "user_id": user_id,
         "compile_error": compile_error,
         "has_error": bool(compile_error and compile_error.strip()),
+        "intent": intent,
     }
 
 
@@ -138,10 +142,16 @@ def route_intent(state: JavaTutorState) -> dict:
     """意图路由节点: 判断用户意图，并短路 debug.
 
     路由规则:
-    1. compile_error 非空 → debug
-    2. 其余基于 user_question 关键词判断
+    1. 显式 intent 字段（来自后端）→ 直接采用
+    2. compile_error 非空 → debug
+    3. 其余基于 user_question 关键词判断
     """
-    # 规则 1: compile_error 短路
+    # 规则 1: 显式 intent（后端直接指定，如 "analyze"）
+    explicit_intent = state.get("intent", "").strip()
+    if explicit_intent in ("data_query", "concept", "debug", "animate", "other", "analyze"):
+        return {"intent": explicit_intent}
+
+    # 规则 2: compile_error 短路
     if _is_compile_error_debug(state):
         return {"intent": "debug"}
 
@@ -244,6 +254,62 @@ def debug_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> d
 def other_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
     """other 专家: 通用兜底."""
     return _run_expert(state, "other", model=model)
+
+
+def _build_analyze_messages(source_code: str, steps_json: str) -> list:
+    """构建分析专家的消息列表（固定模板，不依赖 user_question）。"""
+    from langchain_core.messages import SystemMessage, HumanMessage
+    return [
+        SystemMessage(content=SYSTEM_PROMPT_ANALYZE),
+        HumanMessage(content=f"源代码:\n```java\n{source_code}\n```\n\n步骤快照:\n{steps_json}"),
+    ]
+
+
+def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
+    """analyze 专家: 分析代码复杂度 + 算法/数据结构标签，返回结构化 JSON.
+
+    由前端自动触发（intent='analyze'），不依赖 user_question。
+    使用固定模板 + 低温度确保 JSON 输出稳定。
+    """
+    try:
+        source_code = state.get("source_code", "")
+        steps_json = state.get("steps_json", "[]")
+        logger = logging.getLogger(__name__)
+
+        if model is not None:
+            # 测试模式: 使用注入的 FakeModel
+            response = model.invoke(_build_analyze_messages(source_code, steps_json))
+            raw = response.content if hasattr(response, "content") else str(response)
+        else:
+            # 生产模式: 使用 LLMClient
+            client, llm_config = _get_chat_model()
+            ctx = request_context.get() or new_context(method="analyze_node")
+            client = LLMClient(config=client.config, ctx=ctx)
+
+            response = client.invoke(
+                messages=_build_analyze_messages(source_code, steps_json),
+                model=llm_config.model,
+                temperature=llm_config.temperature,
+                top_p=llm_config.top_p,
+                max_completion_tokens=llm_config.max_completion_tokens,
+            )
+            raw = response.content if hasattr(response, "content") else str(response)
+
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`").strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        # 验证是否为合法 JSON
+        json.loads(raw)
+        return {"answer": raw}
+    except Exception as exc:
+        logger.warning("analyze_node JSON parse failed, using fallback: %s", exc)
+        return {"answer": json.dumps({
+            "complexity": {"time": "未知", "timeExplanation": "分析失败", "space": "未知", "spaceExplanation": "分析失败"},
+            "algorithms": [],
+            "dataStructures": [],
+        }, ensure_ascii=False)}
 
 
 def animate_node(state: JavaTutorState) -> dict:
