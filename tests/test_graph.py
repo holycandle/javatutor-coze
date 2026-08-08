@@ -1,6 +1,7 @@
 """JavaTutor 全流程装配测试."""
 
 import json
+import re
 from typing import Annotated, Any
 from langchain_core.messages import HumanMessage, AIMessage, AnyMessage
 from langgraph.graph.message import add_messages
@@ -111,8 +112,12 @@ class TestGraphAssembly:
             content = result["answer"]
             # 将内容按换行分割成句子
             sentences = [s.strip() for s in content.replace("。", "。\n").split("\n") if s.strip()]
-            # 过滤掉代码块围栏标记（```、```java 等），它们会因多个代码块而自然重复
-            filtered = [s for s in sentences if not s.replace("`", "").strip() == ""]
+            # 过滤掉代码块围栏标记（```、```java 等）和分隔线（---、***），
+            # 它们会因多个代码块/分隔线而自然重复
+            filtered = [s for s in sentences if not (
+                s.replace("`", "").strip() == "" or
+                re.match(r'^[-*]{3,}$', s.strip())
+            )]
             # 如果过滤后只剩纯 fence 就跳过
             if not filtered:
                 continue

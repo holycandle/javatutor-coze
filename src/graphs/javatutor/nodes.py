@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import re
 from typing import Literal, Any
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -59,7 +60,7 @@ def _get_chat_model() -> LLMClient:
     return client, llm_config
 
 
-# ── 去重后处理 ──────────────────────────────────────────────────────────────────
+# ── 去重后处理 & Markdown 规整 ──────────────────────────────────────────────────
 
 
 def _deduplicate_answer(text: str) -> str:
@@ -79,6 +80,29 @@ def _deduplicate_answer(text: str) -> str:
         # 找到 probe 在 tail 中的位置，截断到 probe 开始处
         idx = tail.find(probe)
         return text[:mid - 200 + idx].rstrip()
+    return text
+
+
+def _normalize_md(text: str) -> str:
+    """强制规整 Markdown 格式，确保标题/分隔线/代码块/列表能被正确渲染。
+
+    处理规则（不依赖模型自觉）：
+    1. 「###」后无空格 → 补空格
+    2. 代码块围栏后紧跟代码 → 围栏后插换行
+    3. 「---」与文字粘连 → 前后插换行
+    """
+    # 1. 标题标记后无空格 → 补空格
+    #   匹配行首或换行后的 #、##、### 等，后跟非空格非#非换行字符
+    text = re.sub(r'(^|\n)(#{1,6})(?=[^\s#\n])', r'\1\2 ', text)
+
+    # 2. 代码块围栏后紧跟非换行内容 → 围栏后插换行
+    #   匹配 ``` 或 ```java 等围栏，后跟非换行字符
+    text = re.sub(r'(```\w*)([^\n])', r'\1\n\2', text)
+
+    # 3. 分隔线 --- 与文字粘连 → 前后插换行
+    #   行内 --- 两侧有非换行字符 → 在 --- 前后插换行
+    text = re.sub(r'([^\n])(---)([^\n])', r'\1\n\2\n\3', text)
+
     return text
 
 
@@ -256,7 +280,7 @@ def _run_expert(
         )
         answer = response.content
 
-    return {"answer": _deduplicate_answer(answer)}
+    return {"answer": _normalize_md(_deduplicate_answer(answer))}
 
 
 def data_query_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
