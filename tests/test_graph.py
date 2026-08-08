@@ -46,11 +46,8 @@ class TestGraphAssembly:
         bundle = build_agent()
         compiled = bundle.builder.compile()
         result = compiled.invoke(initial)
-        messages = result.get("messages", [])
-        ai_msgs = [m for m in messages if hasattr(m, "type") and m.type == "ai"]
-        # 不应有重复 AI 消息
-        assert len(ai_msgs) == 1, f"应为 1 条 AI 消息, 实际 {len(ai_msgs)} 条"
-        assert ai_msgs[0].content, "AI 消息内容不应为空"
+        # 正常流程: 专家节点返回 answer 字段
+        assert result.get("answer"), "answer 不应为空"
 
     def test_full_flow_compile_error(self):
         """全流程: compile_error 非空时路由到 debug 专家."""
@@ -66,9 +63,7 @@ class TestGraphAssembly:
         compiled = bundle.builder.compile()
         result = compiled.invoke(initial)
         assert result.get("intent") == "debug", f"期望 intent=debug, 实际={result.get('intent')}"
-        ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
-        assert len(ai_msgs) == 1, "不应有重复 AI 消息"
-        assert ai_msgs[0].content, "AI 消息内容不应为空"
+        assert result.get("answer"), "answer 不应为空"
 
     def test_full_flow_analyze(self):
         """全流程: intent=analyze 时路由到 analyze 专家, 返回结构化 JSON."""
@@ -110,13 +105,10 @@ class TestGraphAssembly:
 
         for call_idx in range(3):
             result = compiled.invoke(initial)
-            msgs = result.get("messages", [])
-            ai_msgs = [m for m in msgs if hasattr(m, "type") and m.type == "ai"]
-            assert len(ai_msgs) == 1, (
-                f"第 {call_idx+1} 次调用: AI 消息数量={len(ai_msgs)}, 期望=1"
-            )
-            # 检查 AI 消息内容中是否包含重复的完整句子
-            content = ai_msgs[0].content
+            # 检查 answer 字段存在且非空
+            assert "answer" in result, f"第 {call_idx+1} 次调用: answer 字段缺失"
+            assert result["answer"], f"第 {call_idx+1} 次调用: answer 为空"
+            content = result["answer"]
             # 将内容按换行分割成句子
             sentences = [s.strip() for s in content.replace("。", "。\n").split("\n") if s.strip()]
             unique_sentences = set(sentences)

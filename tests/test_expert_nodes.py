@@ -94,20 +94,16 @@ class TestExpertNodes:
         state = {**BASE_STATE, "user_question": "为什么第2步 arr 变了？"}
         result = data_query_node(state, model=_build_fake_model("data_query"))
 
-        assert "messages" in result
-        assert len(result["messages"]) == 1
-        assert result["messages"][0].type == "ai"
-        assert "[data_query]" in result["messages"][0].content
+        assert "answer" in result
+        assert "[data_query]" in result["answer"]
 
     def test_concept_returns_answer(self):
         """concept 节点返回包含 AIMessage 的 messages."""
         state = {**BASE_STATE, "user_question": "冒泡排序是什么原理？"}
         result = concept_node(state, model=_build_fake_model("concept"))
 
-        assert "messages" in result
-        assert len(result["messages"]) == 1
-        assert result["messages"][0].type == "ai"
-        assert "[concept]" in result["messages"][0].content
+        assert "answer" in result
+        assert "[concept]" in result["answer"]
 
     def test_debug_with_error(self):
         """debug 节点使用 compile_error 上下文."""
@@ -119,16 +115,16 @@ class TestExpertNodes:
         }
         result = debug_node(state, model=_build_fake_model("debug"))
 
-        assert "messages" in result
-        assert "[debug]" in result["messages"][0].content
+        assert "answer" in result
+        assert "[debug]" in result["answer"]
 
     def test_other_fallback(self):
         """other 节点兜底返回."""
         state = {**BASE_STATE, "user_question": "你好！"}
         result = other_node(state, model=_build_fake_model("other"))
 
-        assert "messages" in result
-        assert "[other]" in result["messages"][0].content
+        assert "answer" in result
+        assert "[other]" in result["answer"]
 
     def test_animate_placeholder(self):
         """animate 节点 Phase 1 返回占位文本."""
@@ -147,8 +143,8 @@ class TestExpertNodes:
         state = {**BASE_STATE, "user_question": "测试"}
         result = _run_expert(state, "concept", model=_build_fake_model("concept"))
 
-        assert "messages" in result
-        assert "[concept]" in result["messages"][0].content
+        assert "answer" in result
+        assert "[concept]" in result["answer"]
 
     def test_build_expert_messages_structure(self):
         """验证专家消息构建: system + user."""

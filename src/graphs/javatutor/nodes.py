@@ -256,7 +256,7 @@ def _run_expert(
         )
         answer = response.content
 
-    return {"messages": [AIMessage(content=_deduplicate_answer(answer))]}
+    return {"answer": _deduplicate_answer(answer)}
 
 
 def data_query_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
