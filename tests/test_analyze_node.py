@@ -46,8 +46,10 @@ class TestAnalyzeNode:
         ]
         model = _build_fake_model(fake_responses)
         result = analyze_node(state, model=model)
-        answer = result.get("answer", "")
-        assert answer, "answer 不应为空"
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+        assert result["messages"][0].type == "ai"
+        answer = result["messages"][0].content
 
         # 解析 JSON 验证结构
         parsed = json.loads(answer)
@@ -89,8 +91,10 @@ class TestAnalyzeNode:
         # FakeListChatModel 返回非 JSON 文本
         model = _build_fake_model(["这不是 JSON 格式的文本"])
         result = analyze_node(state, model=model)
-        answer = result.get("answer", "")
-        assert answer, "兜底应返回非空字符串"
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+        assert result["messages"][0].type == "ai"
+        answer = result["messages"][0].content
 
         # 即使 LLM 返回非 JSON，兜底应生成可解析的 JSON
         parsed = json.loads(answer)

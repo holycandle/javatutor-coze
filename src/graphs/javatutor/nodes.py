@@ -233,7 +233,7 @@ def _run_expert(
         )
         answer = response.content
 
-    return {"answer": answer}
+    return {"messages": [AIMessage(content=answer)]}
 
 
 def data_query_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
@@ -302,34 +302,16 @@ def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) ->
                 raw = raw[4:].strip()
         # 验证是否为合法 JSON
         json.loads(raw)
-        return {"answer": raw}
+        return {"messages": [AIMessage(content=raw)]}
     except Exception as exc:
         logger.warning("analyze_node JSON parse failed, using fallback: %s", exc)
-        return {"answer": json.dumps({
+        return {"messages": [AIMessage(content=json.dumps({
             "complexity": {"time": "未知", "timeExplanation": "分析失败", "space": "未知", "spaceExplanation": "分析失败"},
             "algorithms": [],
             "dataStructures": [],
-        }, ensure_ascii=False)}
+        }, ensure_ascii=False))]}
 
 
 def animate_node(state: JavaTutorState) -> dict:
     """animate 专家: Phase 1 占位，后续接入 SVG 生成器."""
-    return {"answer": SYSTEM_PROMPT_ANIMATE}
-
-
-# === 4. final 节点 ===
-
-
-def build_final(state: JavaTutorState) -> dict:
-    """最终节点: 仅返回新 AIMessage，add_messages 自动合并到历史消息."""
-    answer = state.get("answer", "抱歉，我无法回答这个问题。")
-    return {
-        "messages": [
-            AIMessage(
-                content=answer,
-                additional_kwargs={
-                    "intent": state.get("intent", "other"),
-                },
-            )
-        ],
-    }
+    return {"messages": [AIMessage(content=SYSTEM_PROMPT_ANIMATE)]}

@@ -7,7 +7,6 @@ from langgraph.graph import END, StateGraph
 from graphs.javatutor.nodes import (
     analyze_node,
     animate_node,
-    build_final,
     concept_node,
     data_query_node,
     debug_node,
@@ -62,7 +61,6 @@ def build_flow_graph() -> StateGraph:
     graph.add_node("animate", animate_node)
     graph.add_node("analyze", analyze_node)
     graph.add_node("other", other_node)
-    graph.add_node("final", build_final)
 
     # 设置入口
     graph.set_entry_point("parse_context")
@@ -84,11 +82,8 @@ def build_flow_graph() -> StateGraph:
         },
     )
 
-    # 专家节点 → final
+    # 专家节点 → 结束（专家节点直接返回 AIMessage，build_final 已移除）
     for node in ["data_query", "concept", "debug", "animate", "analyze", "other"]:
-        graph.add_edge(node, "final")
-
-    # final → 结束
-    graph.add_edge("final", END)
+        graph.add_edge(node, END)
 
     return graph
