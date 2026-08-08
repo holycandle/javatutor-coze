@@ -111,11 +111,16 @@ class TestGraphAssembly:
             content = result["answer"]
             # 将内容按换行分割成句子
             sentences = [s.strip() for s in content.replace("。", "。\n").split("\n") if s.strip()]
-            unique_sentences = set(sentences)
-            if len(sentences) != len(unique_sentences):
+            # 过滤掉代码块围栏标记（```、```java 等），它们会因多个代码块而自然重复
+            filtered = [s for s in sentences if not s.replace("`", "").strip() == ""]
+            # 如果过滤后只剩纯 fence 就跳过
+            if not filtered:
+                continue
+            unique_sentences = set(filtered)
+            if len(filtered) != len(unique_sentences):
                 # 找到重复的句子
                 from collections import Counter
-                counts = Counter(sentences)
+                counts = Counter(filtered)
                 duplicates = [s for s, c in counts.items() if c > 1]
                 assert False, (
                     f"第 {call_idx+1} 次调用: 发现重复句子 {duplicates}"
