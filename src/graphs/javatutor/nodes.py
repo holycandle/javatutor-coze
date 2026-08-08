@@ -59,6 +59,29 @@ def _get_chat_model() -> LLMClient:
     return client, llm_config
 
 
+# ── 去重后处理 ──────────────────────────────────────────────────────────────────
+
+
+def _deduplicate_answer(text: str) -> str:
+    """检测文本后半段是否与前半段重复，是则截断到前半段。"""
+    if len(text) < 60:
+        return text
+    mid = len(text) // 2
+    first_half = text[:mid]
+    second_half = text[mid:]
+    # 取后半段开头 30 字符（去空格后），看是否出现在前半段结尾附近
+    probe = second_half[:30].strip()
+    if not probe:
+        return text
+    # 在前半段最后 200 字符中搜索 probe
+    tail = first_half[-200:]
+    if probe in tail:
+        # 找到 probe 在 tail 中的位置，截断到 probe 开始处
+        idx = tail.find(probe)
+        return text[:mid - 200 + idx].rstrip()
+    return text
+
+
 # ── 1. 解析节点 ────────────────────────────────────────────────────────────────
 
 
@@ -233,7 +256,7 @@ def _run_expert(
         )
         answer = response.content
 
-    return {"messages": [AIMessage(content=answer)]}
+    return {"messages": [AIMessage(content=_deduplicate_answer(answer))]}
 
 
 def data_query_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
@@ -302,7 +325,7 @@ def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) ->
                 raw = raw[4:].strip()
         # 验证是否为合法 JSON
         json.loads(raw)
-        return {"messages": [AIMessage(content=raw)]}
+        return {"messages": [AIMessage(content=_deduplicate_answer(raw))]}
     except Exception as exc:
         logger.warning("analyze_node JSON parse failed, using fallback: %s", exc)
         return {"messages": [AIMessage(content=json.dumps({
