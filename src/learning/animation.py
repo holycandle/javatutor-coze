@@ -244,6 +244,7 @@ def build_animation_svg(steps: list[dict], algorithm_tag: str = "sort") -> str:
 # ---------------------------------------------------------------------------
 
 def _render_sort(steps: list[dict]) -> dict:
+    """值身份追踪: 每个柱子按初始值绑定固定 bar_id, 追踪其在各步骤中的实际位置."""
     var_name, series = _series_from_steps(steps)
     if not series:
         return {
@@ -254,25 +255,53 @@ def _render_sort(steps: list[dict]) -> dict:
             "message": _no_data_message("sort"),
         }
     bars = _bar_layout(series[0])
-    move_groups = {i: [] for i in range(len(bars))}
-    highlight_groups = {i: [] for i in range(len(bars))}
-    bar_w = (WIDTH - 2 * MARGIN) / len(bars)
+    n = len(bars)
+    move_groups = {i: [] for i in range(n)}
+    highlight_groups = {i: [] for i in range(n)}
+    bar_w = (WIDTH - 2 * MARGIN) / n
+
+    # position_to_bar[pos] = bar_id  (哪个柱子当前在这个位置)
+    position_to_bar = list(range(n))
+
+    prev = list(series[0])
     for step_i in range(1, len(series)):
-        prev, cur = series[step_i - 1], series[step_i]
+        cur = list(series[step_i])
         begin = round((step_i - 1) * STEP_DURATION, 2)
-        for i in range(len(cur)):
-            if i < len(prev) and prev[i] != cur[i]:
-                highlight_groups[i].append({"begin": begin})
-            if i < len(prev) and prev[i] != cur[i] and cur[i] in prev:
-                j = prev.index(cur[i])
-                if i != j:
-                    move_groups[i].append(
-                        {
-                            "from_x": round(MARGIN + j * bar_w, 1),
-                            "to_x": round(MARGIN + i * bar_w, 1),
-                            "begin": begin,
-                        }
-                    )
+
+        # 找出哪些位置的值变了, 并匹配源位置
+        used_j: set[int] = set()
+        moves: list[tuple[int, int, int]] = []  # (bar_id, from_pos, to_pos)
+
+        for i in range(min(len(prev), len(cur))):
+            if prev[i] == cur[i]:
+                continue
+            # 在 prev 中找到值 == cur[i] 且未被使用的位置 j
+            for j in range(len(prev)):
+                if j in used_j:
+                    continue
+                if prev[j] == cur[i]:
+                    bar_id = position_to_bar[j]
+                    moves.append((bar_id, j, i))
+                    used_j.add(j)
+                    break
+
+        # 生成动画 + 高亮
+        for bar_id, from_pos, to_pos in moves:
+            from_x = round(MARGIN + from_pos * bar_w, 1)
+            to_x = round(MARGIN + to_pos * bar_w, 1)
+            if from_x != to_x:
+                move_groups[bar_id].append(
+                    {"from_x": from_x, "to_x": to_x, "begin": begin}
+                )
+            highlight_groups[bar_id].append({"begin": begin})
+
+        # 更新位置映射
+        new_ptb = list(position_to_bar)
+        for bar_id, _from_pos, to_pos in moves:
+            new_ptb[to_pos] = bar_id
+        position_to_bar = new_ptb
+        prev = list(cur)
+
     return {
         "bars": bars,
         "move_groups": move_groups,

@@ -18,8 +18,12 @@
       <animate attributeName="fill" values="#4f8cff;#ffd166;#4f8cff" dur="0.4s" begin="{{ hl.begin }}s" repeatCount="1"/>
 {% endfor %}
     </rect>
-    <!-- 柱顶数值标注 -->
-    <text x="{{ bar.x + bar.width / 2 }}" y="{{ bar.y - 6 }}" text-anchor="middle" font-size="11" fill="#1e293b" font-weight="600">{{ bar.value }}</text>
+    <!-- 柱顶数值标注（跟随柱子移动） -->
+    <text x="{{ bar.x + bar.width / 2 }}" y="{{ bar.y - 6 }}" text-anchor="middle" font-size="11" fill="#1e293b" font-weight="600">{{ bar.value }}
+{% for move in move_groups[bar.index] %}
+      <animate attributeName="x" from="{{ move.from_x + bar.width / 2 }}" to="{{ move.to_x + bar.width / 2 }}" dur="0.4s" begin="{{ move.begin }}s" fill="freeze"/>
+{% endfor %}
+    </text>
   </g>
 {% endfor %}
   <!-- 底部索引 -->

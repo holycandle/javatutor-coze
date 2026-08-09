@@ -229,3 +229,51 @@ def test_no_data_friendly_message():
     svg = build_animation_svg(steps, "sort")
     assert "动画需要" in svg
     assert "数组" in svg
+
+
+def test_sort_move_from_connects_previous_position():
+    """值身份追踪: 每个柱子的 animate from_x 必须衔接上一个 to_x, 无跳变."""
+    from learning.animation import _render_sort
+
+    steps = [
+        {"variables": {"arr": [5, 3, 1]}},
+        {"variables": {"arr": [3, 5, 1]}},
+        {"variables": {"arr": [3, 1, 5]}},
+        {"variables": {"arr": [1, 3, 5]}},
+    ]
+    data = _render_sort(steps)
+    mg = data["move_groups"]
+
+    # 每个柱子的 animate 序列: from_x 必须衔接上一个 to_x
+    for idx, moves in mg.items():
+        last_to = None
+        for m in moves:
+            if last_to is not None:
+                assert abs(m["from_x"] - last_to) < 0.01, (
+                    f"bar-{idx} from {m['from_x']} not connected to prev to {last_to}"
+                )
+            last_to = m["to_x"]
+
+    # 验证最终位置正确: [1, 3, 5]
+    # bar0(val=5) 最终在位置 2, bar1(val=3) 最终在位置 1, bar2(val=1) 最终在位置 0
+    bar_w = (600 - 2 * 40) / 3  # WIDTH=600, MARGIN=40
+
+    def final_x(moves, initial_x):
+        if not moves:
+            return initial_x
+        return moves[-1]["to_x"]
+
+    assert abs(final_x(mg[0], data["bars"][0]["x"]) - round(40 + 2 * bar_w, 1)) < 0.1
+    assert abs(final_x(mg[1], data["bars"][1]["x"]) - round(40 + 1 * bar_w, 1)) < 0.1
+    assert abs(final_x(mg[2], data["bars"][2]["x"]) - round(40 + 0 * bar_w, 1)) < 0.1
+
+
+def test_sort_svg_text_has_animate():
+    """sort SVG 柱顶数值标注也带 animate, 跟随柱子移动."""
+    steps = [
+        {"variables": {"arr": [5, 3, 1]}},
+        {"variables": {"arr": [3, 5, 1]}},
+    ]
+    svg = build_animation_svg(steps, "sort")
+    # text 元素内应包含 animate attributeName="x"
+    assert 'attributeName="x"' in svg
