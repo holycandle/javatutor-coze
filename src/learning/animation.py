@@ -31,6 +31,21 @@ TEMPLATE_FILES = {
 
 SUPPORTED = tuple(TEMPLATE_FILES.keys())
 
+# 各类别数据不足时的友好提示
+_DATA_HINTS = {
+    "sort": "数组（如 int[] arr 或 int[] nums）",
+    "search": "数组（如 int[] arr）和查找指针（如 mid / index）",
+    "tree": "树（如 TreeNode 对象，暂需数组形式表示）",
+    "graph": "图（含 nodes 和 edges 的邻接结构）",
+    "dp": "DP 表（如 int[] dp 或 int[][] dp）",
+    "linked_list": "链表（如 ListNode 对象，暂需数组形式表示）",
+}
+
+
+def _no_data_message(category: str) -> str:
+    hint = _DATA_HINTS.get(category, "可动画化的数据结构")
+    return f"动画需要 {hint} 数据。当前步骤中未检测到相关变量，请确保代码已运行并包含可动画化的数据结构。"
+
 
 def _map_tags_to_category(names: list) -> str | None:
     """根据 analyze 算法/数据结构标签名映射动画类别；命中返回类别，未命中返回 None。"""
@@ -77,17 +92,8 @@ def classify_algorithm(source_code: str) -> str:
     if any(
         k in code
         for k in (
-            "bubble",
-            "冒泡",
-            "selection",
-            "选择",
-            "insertion",
-            "插入",
-            "quick",
-            "快排",
-            "merge",
-            "归并",
-            "sort",
+            "bubble", "冒泡", "selection", "选择", "insertion", "插入",
+            "quick", "快排", "merge", "归并", "sort",
         )
     ):
         return "sort"
@@ -124,29 +130,70 @@ def _number(value: Any, default: int = 0) -> int:
         return default
 
 
-def _series_from_steps(steps: list[dict]) -> list[list[int]]:
-    series = []
-    for step in steps:
-        variables = step.get("variables") or {}
-        for key in ("arr", "array", "nums", "list"):
-            values = _as_list(variables.get(key))
-            if values:
-                series.append([_number(v) for v in values])
-                break
-    return series
+def _find_array_var(
+    steps: list[dict],
+    exclude: tuple[str, ...] = (),
+    prefer: tuple[str, ...] = (),
+) -> tuple[str | None, list | None]:
+    """自动发现 steps 中变化最大的数组变量；返回 (变量名, 首个数值列表)."""
+    candidates: dict[str, tuple[float, int]] = {}
+    first_step_vars = (steps[0].get("variables") or {}) if steps else {}
+    for key, val in first_step_vars.items():
+        raw = _as_list(val)
+        if not raw:
+            continue
+        nums = [_number(v) for v in raw]
+        if not nums:
+            continue
+        if key.lower() in exclude:
+            continue
+        prefer_score = 1.0 if any(p in key.lower() for p in prefer) else 0.0
+        changes = 0
+        prev_nums = nums
+        for step in steps[1:]:
+            cur_raw = _as_list((step.get("variables") or {}).get(key, []))
+            cur_nums = [_number(v) for v in cur_raw]
+            if len(cur_nums) == len(prev_nums):
+                changes += sum(1 for a, b in zip(prev_nums, cur_nums) if a != b)
+            prev_nums = cur_nums
+        candidates[key] = (prefer_score, changes)
+    if not candidates:
+        return None, None
+    best = max(candidates, key=lambda k: candidates[k])
+    return best, [_number(v) for v in _as_list(first_step_vars.get(best, []))]
+
+
+def _series_from_steps(steps: list[dict]) -> tuple[str, list[list[int]]]:
+    """
+    返回 (检测到的变量名, 按步骤排列的数值序列).
+    优先匹配 prefer 列表里的变量名(arr/array/nums/list),
+    否则自动选变化最大的那个.
+    """
+    if not steps:
+        return "arr", []
+    var_name, first_values = _find_array_var(
+        steps, prefer=("arr", "array", "nums", "list")
+    )
+    if var_name is None:
+        return "arr", []
+    series = [first_values]
+    for step in steps[1:]:
+        raw = _as_list((step.get("variables") or {}).get(var_name, []))
+        series.append([_number(v) for v in raw])
+    return var_name, series
 
 
 def _bar_layout(values: list[int]) -> list[dict]:
     n = max(1, len(values))
     max_value = max(values) if values else 1
     plot_w = WIDTH - 2 * MARGIN
-    plot_h = HEIGHT - 2 * MARGIN
+    plot_h = HEIGHT - 2 * MARGIN - 20  # 底部留 20px 给索引
     bar_w = plot_w / n
     bars = []
     for i, value in enumerate(values):
         h = plot_h * value / max_value if max_value else 0
         x = MARGIN + i * bar_w
-        y = HEIGHT - MARGIN - h
+        y = HEIGHT - MARGIN - 20 - h
         bars.append(
             {
                 "index": i,
@@ -173,6 +220,7 @@ def _load_template(category: str) -> str:
 
 def build_animation_svg(steps: list[dict], algorithm_tag: str = "sort") -> str:
     category = algorithm_tag if algorithm_tag in SUPPORTED else "other"
+    step_count = len(steps) if steps else 0
     if category == "sort":
         data = _render_sort(steps)
     elif category == "search":
@@ -186,14 +234,25 @@ def build_animation_svg(steps: list[dict], algorithm_tag: str = "sort") -> str:
     elif category == "linked_list":
         data = _render_linked_list(steps)
     else:
-        data = {"message": "暂不支持该算法的动画演示"}
+        data = {"message": "暂不支持该算法的动画演示", "variable_name": ""}
+    data["step_count"] = step_count
     return Template(_load_template(category)).render(**data)
 
 
+# ---------------------------------------------------------------------------
+# Render functions
+# ---------------------------------------------------------------------------
+
 def _render_sort(steps: list[dict]) -> dict:
-    series = _series_from_steps(steps)
+    var_name, series = _series_from_steps(steps)
     if not series:
-        return {"bars": [], "move_groups": {}, "highlight_groups": {}, "message": "暂无执行数据"}
+        return {
+            "bars": [],
+            "move_groups": {},
+            "highlight_groups": {},
+            "variable_name": "",
+            "message": _no_data_message("sort"),
+        }
     bars = _bar_layout(series[0])
     move_groups = {i: [] for i in range(len(bars))}
     highlight_groups = {i: [] for i in range(len(bars))}
@@ -218,12 +277,13 @@ def _render_sort(steps: list[dict]) -> dict:
         "bars": bars,
         "move_groups": move_groups,
         "highlight_groups": highlight_groups,
+        "variable_name": var_name,
         "message": "",
     }
 
 
 def _render_search(steps: list[dict]) -> dict:
-    series = _series_from_steps(steps)
+    var_name, series = _series_from_steps(steps)
     bars = _bar_layout(series[0]) if series else []
     scans = []
     bar_w = (WIDTH - 2 * MARGIN) / max(1, len(bars))
@@ -245,14 +305,32 @@ def _render_search(steps: list[dict]) -> dict:
                     "found": bool(variables.get("found")),
                 }
             )
-    return {"bars": bars, "scans": scans, "message": ""}
+    if not bars:
+        return {
+            "bars": [],
+            "scans": [],
+            "variable_name": "",
+            "message": _no_data_message("search"),
+        }
+    return {
+        "bars": bars,
+        "scans": scans,
+        "variable_name": var_name,
+        "message": "",
+    }
 
 
 def _render_tree(steps: list[dict]) -> dict:
     variables = (steps[0].get("variables") or {}) if steps else {}
     tree = [n for n in _as_list(variables.get("tree")) if isinstance(n, dict) and "id" in n]
     if not tree:
-        return {"nodes": [], "edges": [], "highlight_groups": {}, "message": "暂无树数据"}
+        return {
+            "nodes": [],
+            "edges": [],
+            "highlight_groups": {},
+            "variable_name": "",
+            "message": _no_data_message("tree"),
+        }
     node_map = {str(n["id"]): n for n in tree}
     children = {}
     for nid, node in node_map.items():
@@ -279,11 +357,11 @@ def _render_tree(steps: list[dict]) -> dict:
     ordered = [nid for nid in node_map if nid in depth]
     max_depth = max(depth.values()) if depth else 1
     plot_w = WIDTH - 2 * MARGIN
-    plot_h = HEIGHT - 2 * MARGIN
+    plot_h = HEIGHT - 2 * MARGIN - 20
     pos = {}
     for idx, nid in enumerate(ordered):
         x = WIDTH / 2 if len(ordered) == 1 else MARGIN + plot_w * idx / (len(ordered) - 1)
-        y = MARGIN + plot_h * depth[nid] / max_depth
+        y = MARGIN + 20 + plot_h * depth[nid] / max_depth
         pos[nid] = (x, y)
     nodes = [
         {
@@ -316,7 +394,13 @@ def _render_tree(steps: list[dict]) -> dict:
             key = str(nid)
             if key in highlight_groups:
                 highlight_groups[key].append({"begin": begin})
-    return {"nodes": nodes, "edges": edges, "highlight_groups": highlight_groups, "message": ""}
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "highlight_groups": highlight_groups,
+        "variable_name": "tree",
+        "message": "",
+    }
 
 
 def _render_graph(steps: list[dict]) -> dict:
@@ -330,7 +414,8 @@ def _render_graph(steps: list[dict]) -> dict:
             "edges": [],
             "node_highlights": {},
             "edge_highlights": {},
-            "message": "暂无图数据",
+            "variable_name": "",
+            "message": _no_data_message("graph"),
         }
     cx, cy = WIDTH / 2, HEIGHT / 2
     radius = min(WIDTH, HEIGHT) / 2 - 60
@@ -380,18 +465,44 @@ def _render_graph(steps: list[dict]) -> dict:
         "edges": edges,
         "node_highlights": node_highlights,
         "edge_highlights": edge_highlights,
+        "variable_name": "graph",
         "message": "",
     }
 
 
 def _render_dp(steps: list[dict]) -> dict:
+    """
+    支持二维(LCS/背包)和一维(LIS)DP 数组.
+    二维: read variables[dp/table] 双层列表.
+    一维: read 任意数值数组当作单行 DP 表格渲染(逐格填值).
+    """
     variables = (steps[0].get("variables") or {}) if steps else {}
-    rows = [r for r in _as_list(variables.get("dp")) if isinstance(r, list)]
-    if not rows:
-        return {"cells": [], "highlight_groups": {}, "message": "暂无 DP 数据"}
+    # 先尝试二维
+    for key in ("dp", "table", "dpTable"):
+        rows_raw = _as_list(variables.get(key))
+        rows = [r for r in rows_raw if isinstance(r, list)]
+        if rows:
+            return _render_dp_2d(steps, rows, key)
+    # 一维兜底: 自适应找一个变化最大的数值数组
+    var_name, first_values = _find_array_var(
+        steps, exclude=("__", "_"), prefer=("dp", "lis", "lengths", "nums")
+    )
+    if var_name is None:
+        return {
+            "cells": [],
+            "highlight_groups": {},
+            "variable_name": "",
+            "mode": "1d",
+            "message": _no_data_message("dp"),
+        }
+    return _render_dp_1d(steps, first_values, var_name)
+
+
+def _render_dp_2d(steps: list[dict], rows: list[list], var_name: str) -> dict:
+    """二维 DP 表格渲染."""
     n_rows, n_cols = len(rows), max(len(r) for r in rows)
     plot_w = WIDTH - 2 * MARGIN
-    plot_h = HEIGHT - 2 * MARGIN
+    plot_h = HEIGHT - 2 * MARGIN - 20
     cell_w, cell_h = plot_w / n_cols, plot_h / n_rows
     cells = []
     highlight_groups = {}
@@ -399,7 +510,7 @@ def _render_dp(steps: list[dict]) -> dict:
         for c in range(n_cols):
             key = f"{r}-{c}"
             x = MARGIN + c * cell_w
-            y = MARGIN + r * cell_h
+            y = MARGIN + 20 + r * cell_h
             cells.append(
                 {
                     "row": r,
@@ -423,14 +534,77 @@ def _render_dp(steps: list[dict]) -> dict:
             key = f"{_number(current[0])}-{_number(current[1])}"
             if key in highlight_groups:
                 highlight_groups[key].append({"begin": begin})
-    return {"cells": cells, "highlight_groups": highlight_groups, "message": ""}
+    return {
+        "cells": cells,
+        "highlight_groups": highlight_groups,
+        "variable_name": var_name,
+        "mode": "2d",
+        "message": "",
+    }
+
+
+def _render_dp_1d(steps: list[dict], first_values: list[int], var_name: str) -> dict:
+    """一维 DP 渲染为单行表格."""
+    n_cols = len(first_values)
+    plot_w = WIDTH - 2 * MARGIN
+    cell_w = plot_w / n_cols
+    cell_h = 48
+    cells, highlight_groups = [], {}
+    for c in range(n_cols):
+        key = f"0-{c}"
+        x = MARGIN + c * cell_w
+        y = HEIGHT / 2 - cell_h / 2
+        cells.append(
+            {
+                "row": 0,
+                "col": c,
+                "key": key,
+                "value": first_values[c] if c < len(first_values) else "",
+                "x": round(x, 1),
+                "y": round(y, 1),
+                "width": round(cell_w, 1),
+                "height": round(cell_h, 1),
+                "cx": round(x + cell_w / 2, 1),
+                "cy": round(y + cell_h / 2, 1),
+            }
+        )
+        highlight_groups[key] = []
+    for step_i, step in enumerate(steps):
+        cur_raw = _as_list((step.get("variables") or {}).get(var_name, []))
+        cur_vals = [_number(v) for v in cur_raw]
+        begin = round(step_i * STEP_DURATION, 2)
+        for c, (prev, cur) in enumerate(zip(first_values, cur_vals)):
+            if prev != cur:
+                key = f"0-{c}"
+                if key in highlight_groups:
+                    highlight_groups[key].append({"begin": begin})
+        first_values = cur_vals
+    return {
+        "cells": cells,
+        "highlight_groups": highlight_groups,
+        "variable_name": var_name,
+        "mode": "1d",
+        "message": "",
+    }
 
 
 def _render_linked_list(steps: list[dict]) -> dict:
     variables = (steps[0].get("variables") or {}) if steps else {}
     values = _as_list(variables.get("linked_list"))
     if not values:
-        return {"nodes": [], "pointer_marks": [], "message": "暂无链表数据"}
+        # 自适应: 尝试从任意数组变量中找
+        var_name, first_values = _find_array_var(
+            steps, prefer=("linked_list", "list", "head", "node")
+        )
+        if var_name is not None:
+            values = _as_list((steps[0].get("variables") or {}).get(var_name, []))
+    if not values:
+        return {
+            "nodes": [],
+            "pointer_marks": [],
+            "variable_name": "",
+            "message": _no_data_message("linked_list"),
+        }
     nodes = []
     spacing = 90
     for i, value in enumerate(values):
@@ -446,4 +620,9 @@ def _render_linked_list(steps: list[dict]) -> dict:
                 pointer_marks.append(
                     {"x": round(nodes[pointer]["cx"], 1), "begin": round(step_i * STEP_DURATION, 2)}
                 )
-    return {"nodes": nodes, "pointer_marks": pointer_marks, "message": ""}
+    return {
+        "nodes": nodes,
+        "pointer_marks": pointer_marks,
+        "variable_name": "linked_list",
+        "message": "",
+    }

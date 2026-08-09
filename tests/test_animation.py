@@ -4,7 +4,13 @@ import json
 import pytest
 from pathlib import Path
 
-from learning.animation import build_animation_svg, classify_algorithm, _map_tags_to_category
+from learning.animation import (
+    build_animation_svg,
+    classify_algorithm,
+    _map_tags_to_category,
+    _find_array_var,
+    _render_dp,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -104,3 +110,122 @@ def test_linked_list_svg_has_nodes_and_animate():
     assert svg.startswith("<svg")
     assert "node-0" in svg
     assert "<animate" in svg
+
+
+# ---------------------------------------------------------------------------
+# 自适应数据识别 + 一维 DP 支持
+# ---------------------------------------------------------------------------
+
+def test_find_array_var_auto_detect():
+    """_find_array_var 自动发现变化最大的数组变量(不依赖固定名 arr)."""
+    steps = [
+        {"variables": {"nums": [5, 3, 8], "x": 1}},
+        {"variables": {"nums": [3, 5, 8], "x": 2}},
+    ]
+    name, vals = _find_array_var(steps)
+    assert name == "nums"
+    assert vals == [5, 3, 8]
+
+
+def test_find_array_var_prefer_overrides_changes():
+    """prefer 列表中的变量名优先,即使变化次数不是最大."""
+    steps = [
+        {"variables": {"arr": [1, 2], "data": [5, 3]}},
+        {"variables": {"arr": [1, 2], "data": [3, 5]}},
+        {"variables": {"arr": [1, 2], "data": [5, 3]}},
+    ]
+    # data 变化更多,但 arr 在 prefer 列表 → 应选 arr
+    name, _ = _find_array_var(steps, prefer=("arr",))
+    assert name == "arr"
+
+
+def test_find_array_var_empty_steps():
+    """空 steps 返回 (None, None)."""
+    name, vals = _find_array_var([])
+    assert name is None
+    assert vals is None
+
+
+def test_render_dp_1d():
+    """一维 DP (如 LIS) 被正确渲染为单行表格."""
+    steps = [
+        {"variables": {"dp": [1, 1, 2]}},
+        {"variables": {"dp": [1, 1, 3]}},
+    ]
+    data = _render_dp(steps)
+    assert data["mode"] == "1d"
+    assert data["variable_name"] == "dp"
+    assert len(data["cells"]) == 3
+    assert data["cells"][0]["value"] == 1
+
+
+def test_render_dp_1d_no_dp_key_uses_auto_detect():
+    """变量名不是 dp 但变化最大的一维数组也能被识别."""
+    steps = [
+        {"variables": {"lis": [1, 1, 1, 1]}},
+        {"variables": {"lis": [1, 1, 2, 2]}},
+    ]
+    data = _render_dp(steps)
+    assert data["mode"] == "1d"
+    assert data["variable_name"] == "lis"
+    assert len(data["cells"]) == 4
+
+
+def test_render_dp_2d_still_works():
+    """二维 DP (如 LCS) 不受影响."""
+    steps = [
+        {"variables": {"dp": [[0, 0, 0], [0, 1, 1]]}},
+    ]
+    data = _render_dp(steps)
+    assert data["mode"] == "2d"
+    assert data["variable_name"] == "dp"
+    assert len(data["cells"]) == 6  # 2 rows × 3 cols
+
+
+def test_sort_svg_has_variable_name_and_step_count():
+    """sort 动画 SVG 包含变量名和步数图例."""
+    svg = build_animation_svg(_fixture("sort"), "sort")
+    assert "变量:" in svg
+    assert "步" in svg
+    # 柱顶数值标注
+    assert "font-weight" in svg
+
+
+def test_sort_svg_auto_detects_nums():
+    """sort 动画: 变量名是 nums 而非 arr 时也能正确渲染."""
+    steps = [
+        {"variables": {"nums": [5, 3, 1]}},
+        {"variables": {"nums": [3, 5, 1]}},
+        {"variables": {"nums": [1, 3, 5]}},
+    ]
+    svg = build_animation_svg(steps, "sort")
+    assert "nums" in svg
+    assert "<animate" in svg
+
+
+def test_dp_svg_has_variable_name_and_indices():
+    """dp 动画 SVG 包含变量名和列索引."""
+    svg = build_animation_svg(_fixture("dp"), "dp")
+    assert "变量:" in svg or "DP 表" in svg
+    # 列索引标注
+    assert "[0]" in svg or "cell-0-0" in svg
+
+
+def test_dp_1d_svg_renders_values():
+    """一维 DP SVG 格内显示数值."""
+    steps = [
+        {"variables": {"dp": [1, 2, 3]}},
+        {"variables": {"dp": [1, 2, 4]}},
+    ]
+    svg = build_animation_svg(steps, "dp")
+    assert "1" in svg
+    assert "2" in svg
+    assert "3" in svg
+
+
+def test_no_data_friendly_message():
+    """数据不足时返回友好提示而非'暂无XX数据'."""
+    steps = [{"variables": {"x": 1}}]
+    svg = build_animation_svg(steps, "sort")
+    assert "动画需要" in svg
+    assert "数组" in svg
