@@ -4,7 +4,7 @@ import json
 import pytest
 from pathlib import Path
 
-from learning.animation import build_animation_svg, classify_algorithm
+from learning.animation import build_animation_svg, classify_algorithm, _map_tags_to_category
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -31,6 +31,23 @@ def _fixture(name):
 )
 def test_classify_algorithm(source_code, expected):
     assert classify_algorithm(source_code) == expected
+
+
+def test_map_tags_to_category_overrides_weak_source():
+    """llm 语义标签优先于文本匹配:
+    - 能映射的标签 => 返回对应类别
+    - 无法映射的标签 => 返回 None，回退 classify_algorithm
+    """
+    assert _map_tags_to_category(["冒泡排序"]) == "sort"
+    assert _map_tags_to_category(["二分查找"]) == "search"
+    assert _map_tags_to_category(["二叉搜索树"]) == "tree"
+    assert _map_tags_to_category(["Dijkstra算法"]) == "graph"
+    assert _map_tags_to_category(["动态规划"]) == "dp"
+    assert _map_tags_to_category(["链表反转"]) == "linked_list"
+    # 无法映射
+    assert _map_tags_to_category(["UserCode"]) is None
+    assert _map_tags_to_category([]) is None
+    assert _map_tags_to_category(["递归", "枚举"]) is None
 
 
 def test_build_animation_svg_other_fallback():

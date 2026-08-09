@@ -27,7 +27,7 @@ from graphs.javatutor.prompts import (
     SYSTEM_PROMPT_ANALYZE,
 )
 
-from learning.animation import build_animation_svg, classify_algorithm
+from learning.animation import build_animation_svg, classify_algorithm, _map_tags_to_category
 
 # ── 模型配置 ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +142,7 @@ def _parse_json_dict(data: dict) -> dict:
     user_id = data.get("user_id", "")
     compile_error = data.get("compile_error", "")
     intent = data.get("intent", "")
+    algorithm_tags = data.get("algorithm_tags") or []
 
     # 提取当前步骤的变量快照
     current_variables = {}
@@ -162,6 +163,7 @@ def _parse_json_dict(data: dict) -> dict:
         "compile_error": compile_error,
         "has_error": bool(compile_error and compile_error.strip()),
         "intent": intent,
+        "algorithm_tags": algorithm_tags,
     }
 
 
@@ -372,7 +374,8 @@ def animate_node(state: JavaTutorState) -> dict:
     steps = state.get("steps") or []
     if not steps:
         return {"messages": [AIMessage(content="请先运行代码，再点击「生成动画」按钮。")], "svg_text": ""}
-    algorithm_tag = classify_algorithm(state.get("source_code", ""))
+    algorithm_tag = _map_tags_to_category(state.get("algorithm_tags") or []) \
+        or classify_algorithm(state.get("source_code", ""))
     svg_text = build_animation_svg(steps, algorithm_tag)
     return {"messages": [AIMessage(content=svg_text)], "svg_text": svg_text}
 

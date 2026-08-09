@@ -56,6 +56,9 @@ class JavaTutorState(TypedDict, total=False):
     intent: str
     """意图识别结果: data_query | concept | debug | animate | other."""
 
+    algorithm_tags: list
+    """analyze 专家返回的算法/数据结构标签列表，用于动画分类优先."""
+
     # === 专家回答 ===
     answer: str
     """最终回答文本，由专家节点填充."""

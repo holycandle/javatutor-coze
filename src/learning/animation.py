@@ -32,6 +32,46 @@ TEMPLATE_FILES = {
 SUPPORTED = tuple(TEMPLATE_FILES.keys())
 
 
+def _map_tags_to_category(names: list) -> str | None:
+    """根据 analyze 算法/数据结构标签名映射动画类别；命中返回类别，未命中返回 None。"""
+    text = " ".join(str(n) for n in (names or [])).lower()
+    rules = [
+        (
+            (
+                "冒泡", "bubble", "选择", "selection", "插入", "insertion",
+                "快速", "快排", "quick", "归并", "merge", "堆", "heap",
+                "计数", "counting", "桶", "bucket", "基数", "radix", "希尔", "shell",
+            ),
+            "sort",
+        ),
+        (
+            ("二分", "binary", "查找", "search", "线性", "linear"),
+            "search",
+        ),
+        (
+            ("树", "tree", "遍历", "前序", "preorder", "中序", "inorder",
+             "后序", "postorder", "层序", "level", "dfs", "bfs", "二叉"),
+            "tree",
+        ),
+        (
+            ("图", "graph", "dijkstra", "最短路径", "prim", "kruskal", "拓扑"),
+            "graph",
+        ),
+        (
+            ("动态规划", "动态", "dp", "背包", "knapsack", "最长公共", "子序列"),
+            "dp",
+        ),
+        (
+            ("链表", "linked", "listnode", "环形", "cycle"),
+            "linked_list",
+        ),
+    ]
+    for kws, cat in rules:
+        if any(k in text for k in kws):
+            return cat
+    return None
+
+
 def classify_algorithm(source_code: str) -> str:
     code = (source_code or "").lower()
     if any(
