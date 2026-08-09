@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+{% if message %}<text x="40" y="60" font-size="16">{{ message }}</text>{% endif %}
+{% for bar in bars %}
+  <rect id="bar-{{ bar.index }}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}" fill="#4f8cff">
+    <title>{{ bar.value }}</title>
+  </rect>
+{% endfor %}
+{% for scan in scans %}
+  <rect x="{{ scan.x }}" y="40" width="4" height="320" fill="#ef476f" opacity="0">
+    <animate attributeName="opacity" values="0;1;1;0" dur="0.6s" begin="{{ scan.begin }}s" repeatCount="1"/>
+    <animate attributeName="fill" values="#ef476f;{{ '#06d6a0' if scan.found else '#ef476f' }};#ef476f" dur="0.6s" begin="{{ scan.begin }}s" repeatCount="1"/>
+  </rect>
+{% endfor %}
+</svg>

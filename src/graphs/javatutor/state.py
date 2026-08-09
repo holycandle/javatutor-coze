@@ -59,3 +59,6 @@ class JavaTutorState(TypedDict, total=False):
     # === 专家回答 ===
     answer: str
     """最终回答文本，由专家节点填充."""
+
+    svg_text: str
+    """动画分支生成的 SVG 文本，非动画分支为空字符串."""

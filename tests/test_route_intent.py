@@ -49,16 +49,26 @@ class TestRouteIntent:
         result = route_intent(state)
         assert result["intent"] == "concept"
 
-    def test_animate_pattern(self):
-        """动画演示类关键词 → Phase 1 无动画路由，回退到 other."""
+    def test_animate_keyword_guides_button(self):
+        """动画演示类关键词 → animate_guide（引导用户点击按钮）."""
         state = {
             "user_question": "能给我演示一下排序的过程吗？",
             "has_error": False,
             "compile_error": "",
         }
         result = route_intent(state)
-        # Phase 1: 无 animate 关键词匹配，回退到 other
-        assert result["intent"] == "other"
+        assert result["intent"] == "animate_guide"
+
+    def test_animate_explicit_intent(self):
+        """显式 intent: animate → animate."""
+        state = {
+            "user_question": "",
+            "has_error": False,
+            "compile_error": "",
+            "intent": "animate",
+        }
+        result = route_intent(state)
+        assert result["intent"] == "animate"
 
     def test_other_fallback(self):
         """无法归类 → other."""

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+{% if message %}<text x="40" y="60" font-size="16">{{ message }}</text>{% endif %}
+{% for cell in cells %}
+  <rect id="cell-{{ cell.row }}-{{ cell.col }}" x="{{ cell.x }}" y="{{ cell.y }}" width="{{ cell.width }}" height="{{ cell.height }}" fill="#e2e8f0" stroke="#64748b">
+    <title>{{ cell.value }}</title>
+{% for hl in highlight_groups[cell.key] %}
+    <animate attributeName="fill" values="#e2e8f0;#ffd166;#e2e8f0" dur="0.6s" begin="{{ hl.begin }}s" repeatCount="1"/>
+{% endfor %}
+  </rect>
+  <text x="{{ cell.cx }}" y="{{ cell.cy }}" text-anchor="middle" dominant-baseline="central" font-size="12">{{ cell.value }}</text>
+{% endfor %}
+</svg>

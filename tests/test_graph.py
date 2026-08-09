@@ -31,6 +31,8 @@ class TestGraphAssembly:
         assert "data_query" in graph.nodes
         assert "concept" in graph.nodes
         assert "debug" in graph.nodes
+        assert "animate" in graph.nodes
+        assert "animate_guide" in graph.nodes
         assert "other" in graph.nodes
         assert "analyze" in graph.nodes
 
@@ -130,3 +132,38 @@ class TestGraphAssembly:
                 assert False, (
                     f"第 {call_idx+1} 次调用: 发现重复句子 {duplicates}"
                 )
+
+    def test_full_flow_animate_explicit(self):
+        """全流程: intent=animate 时路由到 animate 专家, 返回 SVG."""
+        payload = {
+            "source_code": "public class BubbleSort {}",
+            "steps": [{"step": 0, "variables": {"arr": [5, 3, 1]}}, {"step": 1, "variables": {"arr": [3, 5, 1]}}],
+            "current_step_index": 1,
+            "user_question": "",
+            "compile_error": "",
+            "intent": "animate",
+        }
+        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
+        compiled = build_agent().builder.compile()
+        result = compiled.invoke(initial)
+        ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
+        assert ai_msgs, "应有 AI 消息"
+        assert ai_msgs[-1].content.startswith("<svg"), "animate 应返回纯 SVG"
+        assert "<animate" in ai_msgs[-1].content, "SVG 应包含动画"
+        assert result.get("svg_text", "").startswith("<svg"), "svg_text 应为 SVG"
+
+    def test_full_flow_animate_guide(self):
+        """全流程: 动画关键词路由到 animate_guide, 返回引导文案."""
+        payload = {
+            "source_code": "public class BubbleSort {}",
+            "steps": [{"step": 0, "variables": {"arr": [5, 3, 1]}}],
+            "current_step_index": 0,
+            "user_question": "帮我生成一个动画",
+            "compile_error": "",
+        }
+        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
+        compiled = build_agent().builder.compile()
+        result = compiled.invoke(initial)
+        assert result.get("intent") == "animate_guide", f"期望 intent=animate_guide, 实际={result.get('intent')}"
+        ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
+        assert ai_msgs and "生成动画" in ai_msgs[-1].content

@@ -22,10 +22,12 @@ from graphs.javatutor.prompts import (
     SYSTEM_PROMPT_DATA_QUERY,
     SYSTEM_PROMPT_CONCEPT,
     SYSTEM_PROMPT_DEBUG,
-    SYSTEM_PROMPT_ANIMATE,
+    ANIMATE_GUIDE_MESSAGE,
     SYSTEM_PROMPT_OTHER,
     SYSTEM_PROMPT_ANALYZE,
 )
+
+from learning.animation import build_animation_svg, classify_algorithm
 
 # ── 模型配置 ──────────────────────────────────────────────────────────────────
 
@@ -215,6 +217,10 @@ def route_intent(state: JavaTutorState) -> dict:
     if any(kw in question for kw in concept_keywords):
         return {"intent": "concept"}
 
+    # 动画关键词 → animate_guide 引导文案
+    if any(kw in question for kw in ("动画", "演示", "可视化", "播放")):
+        return {"intent": "animate_guide"}
+
     # 兜底: other
     return {"intent": "other"}
 
@@ -280,7 +286,9 @@ def _run_expert(
         )
         answer = response.content
 
-    return {"answer": _normalize_md(_deduplicate_answer(answer))}
+    answer = _normalize_md(_deduplicate_answer(answer))
+    labels = {"data_query": "数据追问", "concept": "概念讲解", "debug": "错误诊断", "other": "通用助手"}
+    return {"answer": f"【{labels.get(expert, '通用助手')}】{answer}"}
 
 
 def data_query_node(state: JavaTutorState, model: "BaseChatModel | None" = None) -> dict:
@@ -360,5 +368,15 @@ def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) ->
 
 
 def animate_node(state: JavaTutorState) -> dict:
-    """animate 专家: Phase 1 占位，后续接入 SVG 生成器."""
-    return {"messages": [AIMessage(content=SYSTEM_PROMPT_ANIMATE)]}
+    """animate 专家: 基于 steps 生成纯 SVG 动画消息."""
+    steps = state.get("steps") or []
+    if not steps:
+        return {"messages": [AIMessage(content="请先运行代码，再点击「生成动画」按钮。")], "svg_text": ""}
+    algorithm_tag = classify_algorithm(state.get("source_code", ""))
+    svg_text = build_animation_svg(steps, algorithm_tag)
+    return {"messages": [AIMessage(content=svg_text)], "svg_text": svg_text}
+
+
+def animate_guide_node(state: JavaTutorState) -> dict:
+    """聊天中请求动画时的固定引导，不调用 LLM."""
+    return {"messages": [AIMessage(content=ANIMATE_GUIDE_MESSAGE)]}
