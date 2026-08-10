@@ -191,3 +191,17 @@ class TestExpertNodes:
         assert isinstance(messages[1], HumanMessage)
         # system prompt 包含专家角色定义
         assert SYSTEM_PROMPT_DEBUG[:20] in messages[0].content
+
+    def test_expert_messages_include_retrieved_chunks(self):
+        """专家消息包含 RAG 检索到的知识库参考."""
+        from graphs.javatutor.nodes import _build_expert_messages
+
+        state = {
+            **BASE_STATE,
+            "retrieved_chunks": [
+                {"source": "知识库: HashMap", "chunk_index": 0, "content": "基于哈希表的映射", "score": 0.8}
+            ],
+        }
+        messages = _build_expert_messages(state, "concept")
+        assert "知识库参考" in messages[1].content
+        assert "知识库: HashMap" in messages[1].content

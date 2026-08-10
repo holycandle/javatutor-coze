@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {"title": "Arrays.sort", "explanation": "对数组原地排序，默认升序。"},
+    {"title": "Arrays.binarySearch", "explanation": "在已排序数组中二分查找，返回下标或负数。"},
+    {"title": "HashMap", "explanation": "基于哈希表的键值映射，平均 O(1) 查询。"},
+    {"title": "ArrayList", "explanation": "动态数组，支持随机访问，扩容时复制元素。"},
+    {"title": "String.substring", "explanation": "返回 [beginIndex, endIndex) 的子串。"}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {"title": "cannot find symbol", "explanation": "变量名或方法名不存在，检查拼写或是否声明。"},
+    {"title": "incompatible types", "explanation": "类型不匹配，例如把字符串赋给了 int。"},
+    {"title": "missing return statement", "explanation": "方法声明了返回值，但某个分支没有 return。"},
+    {"title": "NullPointerException", "explanation": "对 null 对象调用了方法或访问了字段。"},
+    {"title": "ArrayIndexOutOfBoundsException", "explanation": "访问数组时下标越界。"}
+  ]
+}

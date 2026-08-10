@@ -65,3 +65,43 @@ class JavaTutorState(TypedDict, total=False):
 
     svg_text: str
     """动画分支生成的 SVG 文本，非动画分支为空字符串."""
+
+    # === 深化链路状态 ===
+    intent_confidence: float
+    """意图分类置信度 0-1."""
+
+    retrieved_chunks: list[dict]
+    """RAG 检索到的知识库片段."""
+
+    context_summary: str
+    """上下文压缩摘要."""
+
+    critic_feedback: str
+    """评审反馈."""
+
+    revised_answer: str
+    """修订后的回答."""
+
+    decision_trace: dict
+    """决策痕迹，用于输出给前端."""
+
+    rag_degraded: bool
+    """RAG 检索是否降级（失败时 True）."""
+
+    critic_skipped: bool
+    """评审是否跳过（异常时 True）."""
+
+    revise_skipped: bool
+    """修订是否跳过（异常时 True）."""
+
+    compaction_mode: str
+    """压缩模式: none | windowed | truncated."""
+
+    fallback_reason: str
+    """降级原因."""
+
+    critic_passed: bool
+    """评审是否通过."""
+
+    revised: bool
+    """是否已修订."""

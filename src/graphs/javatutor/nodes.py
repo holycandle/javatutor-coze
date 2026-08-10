@@ -17,6 +17,8 @@ from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import default_headers, new_context
 from coze_coding_dev_sdk import LLMClient, Config, LLMConfig as SDKLLMConfig
 
+from graphs.javatutor.llm import get_chat_model as _get_chat_model
+
 from graphs.javatutor.state import JavaTutorState
 from graphs.javatutor.prompts import (
     SYSTEM_PROMPT_DATA_QUERY,
@@ -31,35 +33,7 @@ from learning.animation import build_animation_svg, classify_algorithm, _map_tag
 
 # ── 模型配置 ──────────────────────────────────────────────────────────────────
 
-LLM_CONFIG_PATH = "config/agent_llm_config.json"
-
-
-def _get_chat_model() -> LLMClient:
-    """热加载配置并创建 LLMClient 实例（单例）."""
-    workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-    config_path = os.path.join(workspace_path, LLM_CONFIG_PATH)
-
-    with open(config_path, encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
-
-    base_config = Config(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=cfg["config"].get("timeout", 600),
-    )
-    llm_config = SDKLLMConfig(
-        model=cfg["config"].get("model", "doubao-seed-2-0-lite-260215"),
-        temperature=cfg["config"].get("temperature", 0.7),
-        top_p=cfg["config"].get("top_p", 0.9),
-        max_completion_tokens=cfg["config"].get("max_completion_tokens", 10000),
-        streaming=False,
-    )
-    ctx = request_context.get() or new_context(method="_get_chat_model")
-    client = LLMClient(config=base_config, ctx=ctx)
-    return client, llm_config
+# _get_chat_model 从 graphs.javatutor.llm 导入，避免循环依赖
 
 
 # ── 去重后处理 & Markdown 规整 ──────────────────────────────────────────────────
@@ -189,42 +163,32 @@ def _is_compile_error_debug(state: JavaTutorState) -> bool:
     return bool(state.get("compile_error", "").strip())
 
 
-def route_intent(state: JavaTutorState) -> dict:
-    """意图路由节点: 判断用户意图，并短路 debug.
+def route_intent(state: JavaTutorState, model=None) -> dict:
+    """意图路由节点: 显式 intent / compile_error 短路，其余 LLM 分类。
 
     路由规则:
     1. 显式 intent 字段（来自后端）→ 直接采用
     2. compile_error 非空 → debug
-    3. 其余基于 user_question 关键词判断
+    3. 其余调用 classify_intent（LLM 语义分类）
     """
     # 规则 1: 显式 intent（后端直接指定，如 "analyze"）
-    explicit_intent = state.get("intent", "").strip()
-    if explicit_intent in ("data_query", "concept", "debug", "animate", "other", "analyze"):
-        return {"intent": explicit_intent}
+    explicit = state.get("intent", "").strip()
+    if explicit in ("data_query", "concept", "debug", "animate", "animate_guide", "analyze", "other"):
+        return {"intent": explicit, "intent_confidence": 1.0, "fallback_reason": ""}
 
     # 规则 2: compile_error 短路
     if _is_compile_error_debug(state):
-        return {"intent": "debug"}
+        return {"intent": "debug", "intent_confidence": 1.0, "fallback_reason": ""}
 
-    question = state.get("user_question", "").lower()
+    # 规则 3: LLM 意图分类
+    from graphs.javatutor.intent import classify_intent
 
-    # 规则 2: 关键词匹配
-    # 数据追问: 变量值、执行过程、步骤
-    data_query_keywords = ["为什么", "怎么", "如何", "arr", "变量", "值", "步骤", "结果", "输出"]
-    # 概念讲解: 算法、原理、复杂度、定义
-    concept_keywords = ["是什么", "算法", "复杂度", "概念", "原理", "定义", "时间", "空间", "o(", "大o"]
-
-    if any(kw in question for kw in data_query_keywords):
-        return {"intent": "data_query"}
-    if any(kw in question for kw in concept_keywords):
-        return {"intent": "concept"}
-
-    # 动画关键词 → animate_guide 引导文案
-    if any(kw in question for kw in ("动画", "演示", "可视化", "播放")):
-        return {"intent": "animate_guide"}
-
-    # 兜底: other
-    return {"intent": "other"}
+    result = classify_intent(state.get("user_question", ""), model=_resolve_model(model))
+    return {
+        "intent": result["intent"],
+        "intent_confidence": result["confidence"],
+        "fallback_reason": result["reason"],
+    }
 
 
 # ── 3. 专家节点 ────────────────────────────────────────────────────────────────
@@ -255,6 +219,12 @@ def _build_expert_messages(state: JavaTutorState, expert: str) -> list:
     if compile_error:
         context_parts.append(f"\n### 编译错误\n{compile_error}")
 
+    # RAG 知识库参考注入
+    chunks = state.get("retrieved_chunks") or []
+    if chunks:
+        refs = "\n".join(f"- {c['source']}: {c['content'][:200]}" for c in chunks)
+        context_parts.append(f"\n### 知识库参考\n{refs}\n回答中如引用知识库内容，必须标注「参考知识库：来源名」。")
+
     context = "\n".join(context_parts)
 
     return [SystemMessage(content=system_prompt), HumanMessage(content=context)]
@@ -272,12 +242,11 @@ def _run_expert(
     """
     messages = _build_expert_messages(state, expert)
 
-    if model is not None:
-        # 测试模式: 使用注入的 FakeModel
-        response = model.invoke(messages)
+    resolved = _resolve_model(model)
+    if resolved is not None:
+        response = resolved.invoke(messages)
         answer = response.content
     else:
-        # 生产模式: 使用 LLMClient
         client, llm_config = _get_chat_model()
         response = client.invoke(
             messages=messages,
@@ -351,6 +320,8 @@ def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) ->
                 max_completion_tokens=llm_config.max_completion_tokens,
             )
             raw = response.content if hasattr(response, "content") else str(response)
+        if not isinstance(raw, str):
+            raw = str(raw)
 
         raw = raw.strip()
         if raw.startswith("```"):
@@ -383,3 +354,67 @@ def animate_node(state: JavaTutorState) -> dict:
 def animate_guide_node(state: JavaTutorState) -> dict:
     """聊天中请求动画时的固定引导，不调用 LLM."""
     return {"messages": [AIMessage(content=ANIMATE_GUIDE_MESSAGE)]}
+
+
+# ── 4. 深化链路节点 ────────────────────────────────────────────────────────────
+
+
+def _resolve_model(model):
+    """优先用传入的 model，否则从 LangGraph configurable 中取 chat_model。
+
+    使用 langgraph.config.get_config（非 langchain_core.runnables.get_runnable_config）。
+    """
+    if model is not None:
+        return model
+    try:
+        from langgraph.config import get_config
+
+        return get_config().get("configurable", {}).get("chat_model")
+    except Exception:
+        return None
+
+
+def context_compaction(state: JavaTutorState) -> dict:
+    """上下文压缩节点：steps 过长时窗口截取 + 摘要。"""
+    from graphs.javatutor.compaction import compact_steps
+
+    return compact_steps(state.get("steps") or [], state.get("current_step_index", 0))
+
+
+def retrieve_knowledge(state: JavaTutorState) -> dict:
+    """RAG 检索节点：查询知识库，失败时降级放行。"""
+    from learning.knowledge import search_chunks
+
+    try:
+        query = f"{state.get('user_question', '')} {state.get('context_summary', '')}".strip()
+        chunks = search_chunks(query)
+        return {"retrieved_chunks": chunks, "rag_degraded": False}
+    except Exception:
+        return {"retrieved_chunks": [], "rag_degraded": True}
+
+
+def build_final(state: JavaTutorState) -> dict:
+    """最终输出节点：拼接回答 + 决策痕迹。
+
+    返回 {"answer": ..., "decision_trace": ...}（不返回 messages，避免平台回环重发）。
+    """
+    answer = state.get("revised_answer") or state.get("answer") or "抱歉，我暂时无法回答这个问题。"
+    answer = _normalize_md(answer)
+
+    trace = {
+        "intent": state.get("intent", "other"),
+        "confidence": round(float(state.get("intent_confidence", 0.0)), 2),
+        "sources": [
+            {"source": c["source"], "score": c.get("score", 0.0)}
+            for c in (state.get("retrieved_chunks") or [])
+        ],
+        "critic_passed": state.get("critic_passed", True),
+        "revised": state.get("revised", False),
+        "fallback_reason": state.get("fallback_reason", ""),
+        "rag_degraded": state.get("rag_degraded", False),
+        "critic_skipped": state.get("critic_skipped", False),
+        "revise_skipped": state.get("revise_skipped", False),
+        "compaction_mode": state.get("compaction_mode", "none"),
+    }
+    content = f"{answer}\n\n【决策痕迹】\n{json.dumps(trace, ensure_ascii=False)}"
+    return {"answer": content, "decision_trace": trace}

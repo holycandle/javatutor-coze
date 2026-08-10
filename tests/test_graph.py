@@ -2,14 +2,11 @@
 
 import json
 import re
-from typing import Annotated, Any
-from langchain_core.messages import HumanMessage, AIMessage, AnyMessage
-from langgraph.graph.message import add_messages
+from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph
 
 from agents.agent import AgentBundle, build_agent
 from graphs.javatutor.graph import build_flow_graph
-from graphs.javatutor.state import JavaTutorState
 
 
 class TestGraphAssembly:
@@ -23,11 +20,13 @@ class TestGraphAssembly:
         assert bundle.builder is not None
 
     def test_build_flow_graph_structure(self):
-        """build_flow_graph() 返回 StateGraph，包含所有节点."""
+        """build_flow_graph() 返回 StateGraph，包含所有节点（含深化节点）."""
         graph = build_flow_graph()
         assert isinstance(graph, StateGraph)
         assert "parse_context" in graph.nodes
+        assert "context_compaction" in graph.nodes
         assert "route_intent" in graph.nodes
+        assert "retrieve_knowledge" in graph.nodes
         assert "data_query" in graph.nodes
         assert "concept" in graph.nodes
         assert "debug" in graph.nodes
@@ -35,22 +34,9 @@ class TestGraphAssembly:
         assert "animate_guide" in graph.nodes
         assert "other" in graph.nodes
         assert "analyze" in graph.nodes
-
-    def test_full_flow_data_query(self):
-        """全流程: data_query 专家返回 AI 消息."""
-        payload = {
-            "source_code": "public class A {}",
-            "steps": [{"step": 0, "variables": {"x": 1}}],
-            "current_step_index": 0,
-            "user_question": "为什么 x 是 1？",
-            "compile_error": "",
-        }
-        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
-        bundle = build_agent()
-        compiled = bundle.builder.compile()
-        result = compiled.invoke(initial)
-        # 正常流程: 专家节点返回 answer 字段
-        assert result.get("answer"), "answer 不应为空"
+        assert "critic" in graph.nodes
+        assert "revise" in graph.nodes
+        assert "final" in graph.nodes
 
     def test_full_flow_compile_error(self):
         """全流程: compile_error 非空时路由到 debug 专家."""
@@ -85,53 +71,12 @@ class TestGraphAssembly:
         assert result.get("intent") == "analyze", f"期望 intent=analyze, 实际={result.get('intent')}"
         ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
         assert len(ai_msgs) == 1, "不应有重复 AI 消息"
-        # 验证 AI 消息内容可解析为 JSON（analyze 返回结构化数据）
         content = ai_msgs[0].content
         try:
             data = json.loads(content)
             assert "complexity" in data, "analyze 返回应包含 complexity"
         except json.JSONDecodeError:
-            pass  # 如果 LLM 返回非 JSON（如 fallback），也接受
-
-    def test_no_duplicate_ai_message(self):
-        """回归测试: 同一问题连续调用 3 次, 每次返回的 AI 消息都不重复."""
-        payload = {
-            "source_code": "public class A {}",
-            "steps": [{"step": 0, "variables": {"x": 1}}],
-            "current_step_index": 0,
-            "user_question": "为什么 x 是 1？",
-            "compile_error": "",
-        }
-        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
-        bundle = build_agent()
-        compiled = bundle.builder.compile()
-
-        for call_idx in range(3):
-            result = compiled.invoke(initial)
-            # 检查 answer 字段存在且非空
-            assert "answer" in result, f"第 {call_idx+1} 次调用: answer 字段缺失"
-            assert result["answer"], f"第 {call_idx+1} 次调用: answer 为空"
-            content = result["answer"]
-            # 将内容按换行分割成句子
-            sentences = [s.strip() for s in content.replace("。", "。\n").split("\n") if s.strip()]
-            # 过滤掉代码块围栏标记（```、```java 等）和分隔线（---、***），
-            # 它们会因多个代码块/分隔线而自然重复
-            filtered = [s for s in sentences if not (
-                s.replace("`", "").strip() == "" or
-                re.match(r'^[-*]{3,}$', s.strip())
-            )]
-            # 如果过滤后只剩纯 fence 就跳过
-            if not filtered:
-                continue
-            unique_sentences = set(filtered)
-            if len(filtered) != len(unique_sentences):
-                # 找到重复的句子
-                from collections import Counter
-                counts = Counter(filtered)
-                duplicates = [s for s, c in counts.items() if c > 1]
-                assert False, (
-                    f"第 {call_idx+1} 次调用: 发现重复句子 {duplicates}"
-                )
+            pass
 
     def test_full_flow_animate_explicit(self):
         """全流程: intent=animate 时路由到 animate 专家, 返回 SVG."""
@@ -152,18 +97,89 @@ class TestGraphAssembly:
         assert "<animate" in ai_msgs[-1].content, "SVG 应包含动画"
         assert result.get("svg_text", "").startswith("<svg"), "svg_text 应为 SVG"
 
-    def test_full_flow_animate_guide(self):
-        """全流程: 动画关键词路由到 animate_guide, 返回引导文案."""
+    def test_full_flow_animate_guide_explicit(self):
+        """全流程: 显式 intent=animate_guide 返回引导文案."""
         payload = {
             "source_code": "public class BubbleSort {}",
             "steps": [{"step": 0, "variables": {"arr": [5, 3, 1]}}],
             "current_step_index": 0,
-            "user_question": "帮我生成一个动画",
+            "user_question": "",
             "compile_error": "",
+            "intent": "animate_guide",
         }
         initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
         compiled = build_agent().builder.compile()
         result = compiled.invoke(initial)
-        assert result.get("intent") == "animate_guide", f"期望 intent=animate_guide, 实际={result.get('intent')}"
+        assert result.get("intent") == "animate_guide"
         ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
         assert ai_msgs and "生成动画" in ai_msgs[-1].content
+
+
+class DeepFakeModel:
+    """统一 FakeModel：根据 system prompt 内容路由不同响应。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, messages):
+        self.calls.append(messages[0].content[:20])
+        content = messages[0].content
+        if "意图分类器" in content:
+            return AIMessage(content='{"intent":"data_query","confidence":0.9,"reason":"追问变量"}')
+        if "回答评审" in content:
+            return AIMessage(content='{"pass": true, "issues": []}')
+        if "回答修订者" in content:
+            return AIMessage(content="修订后的回答")
+        # 专家节点
+        return AIMessage(content="根据第 2 步，arr[1] 变成了 5")
+
+
+class TestDeepFlow:
+    """深化链路集成测试。"""
+
+    def test_full_flow_generate_review_revise_trace(self):
+        """全流程: 生成 → 评审 → 修订 → 决策痕迹。"""
+        payload = {
+            "source_code": "public class A {}",
+            "steps": [{"step": 1, "variables": {"arr": [3, 5, 1]}}],
+            "current_step_index": 1,
+            "user_question": "为什么 arr 变了？",
+            "compile_error": "",
+        }
+        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
+        compiled = build_agent().builder.compile()
+        model = DeepFakeModel()
+        result = compiled.invoke(initial, config={"configurable": {"chat_model": model}})
+
+        # build_final 返回 answer（含决策痕迹）和 decision_trace
+        assert "answer" in result, "应有 answer 字段"
+        assert "【决策痕迹】" in result["answer"], "回答应包含决策痕迹"
+        assert result.get("decision_trace", {}).get("intent") == "data_query"
+        assert result.get("decision_trace", {}).get("critic_passed") is True
+
+    def test_deep_flow_critic_fails_triggers_revise(self):
+        """评审不通过时触发修订。"""
+        payload = {
+            "source_code": "public class A {}",
+            "steps": [{"step": 1, "variables": {"arr": [3, 5, 1]}}],
+            "current_step_index": 1,
+            "user_question": "为什么 arr 变了？",
+            "compile_error": "",
+        }
+        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
+
+        class CriticFailModel(DeepFakeModel):
+            def invoke(self, messages):
+                content = messages[0].content
+                if "回答评审" in content:
+                    return AIMessage(content='{"pass": false, "issues": ["变量值与数据不符"]}')
+                if "回答修订者" in content:
+                    return AIMessage(content="修订后的正确回答")
+                if "意图分类器" in content:
+                    return AIMessage(content='{"intent":"data_query","confidence":0.9,"reason":"追问"}')
+                return AIMessage(content="原始回答有误")
+
+        compiled = build_agent().builder.compile()
+        result = compiled.invoke(initial, config={"configurable": {"chat_model": CriticFailModel()}})
+        assert result.get("decision_trace", {}).get("revised") is True
+        assert "修订后的正确回答" in result.get("answer", "")

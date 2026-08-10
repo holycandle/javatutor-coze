@@ -71,10 +71,23 @@ def _create_engine_with_retry():
     logger.error(f"Database connection failed after {MAX_RETRY_TIME}s: {last_error}")
     raise last_error  # pyright: ignore [reportGeneralTypeIssues]
 
+def _create_fallback_engine():
+    """PGDATABASE_URL 不可用时，使用 SQLite 兜底，保证服务能启动。"""
+    logger.warning("PGDATABASE_URL not configured, falling back to SQLite engine")
+    engine = create_engine("sqlite:////tmp/javatutor_fallback.db", pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    logger.warning("SQLite fallback engine created (data will not persist across restarts)")
+    return engine
+
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = _create_engine_with_retry()
+        try:
+            _engine = _create_engine_with_retry()
+        except Exception as e:
+            logger.warning(f"PostgreSQL engine creation failed ({e}), using SQLite fallback")
+            _engine = _create_fallback_engine()
     return _engine
 
 def get_sessionmaker():
