@@ -65,11 +65,18 @@ def _vector_to_str(vec: list[float]) -> str:
 
 
 def insert_chunks(chunks: list[dict[str, Any]], url: str | None = None) -> None:
+    """插入知识分块，同 source 的旧数据会被先清除（幂等灌库）。"""
     if not chunks:
         return
+    sources = sorted({c["source"] for c in chunks})
     vectors = embed_texts([c["content"] for c in chunks])
     with psycopg.connect(url or _db_url()) as conn:
         with conn.cursor() as cur:
+            # 清除同 source 旧数据，避免重复灌库产生重复
+            cur.execute(
+                "DELETE FROM knowledge_chunks WHERE source = ANY(%s)",
+                (sources,),
+            )
             for chunk, vector in zip(chunks, vectors):
                 cur.execute(
                     "INSERT INTO knowledge_chunks (source, chunk_index, content, embedding) "
