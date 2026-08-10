@@ -32,11 +32,11 @@ def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50)
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """使用 Coze SDK EmbeddingClient 生成向量，dimensions=1024。"""
+    """使用 Coze SDK EmbeddingClient 逐条生成向量，dimensions=1024。"""
     from coze_coding_dev_sdk import EmbeddingClient
 
     client = EmbeddingClient()
-    return client.embed_texts(texts, dimensions=EMBEDDING_DIM)
+    return [client.embed_text(t, dimensions=EMBEDDING_DIM) for t in texts]
 
 
 def _db_url() -> str:
@@ -59,6 +59,11 @@ def ensure_schema(url: str | None = None) -> None:
             )
 
 
+def _vector_to_str(vec: list[float]) -> str:
+    """将 float 列表转为 pgvector 可识别的字符串格式: [0.1,0.2,...]"""
+    return "[" + ",".join(str(v) for v in vec) + "]"
+
+
 def insert_chunks(chunks: list[dict[str, Any]], url: str | None = None) -> None:
     if not chunks:
         return
@@ -69,7 +74,7 @@ def insert_chunks(chunks: list[dict[str, Any]], url: str | None = None) -> None:
                 cur.execute(
                     "INSERT INTO knowledge_chunks (source, chunk_index, content, embedding) "
                     "VALUES (%s, %s, %s, %s::vector)",
-                    (chunk["source"], chunk["chunk_index"], chunk["content"], vector),
+                    (chunk["source"], chunk["chunk_index"], chunk["content"], _vector_to_str(vector)),
                 )
         conn.commit()
 
@@ -90,12 +95,13 @@ def seed_assets(url: str | None = None) -> int:
 
 
 def _fetch_similar(vector: list[float], top_k: int, url: str | None = None) -> list[tuple]:
+    vec_str = _vector_to_str(vector)
     with psycopg.connect(url or _db_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT source, chunk_index, content, 1 - (embedding <=> %s::vector) AS score "
                 "FROM knowledge_chunks ORDER BY embedding <=> %s::vector LIMIT %s",
-                (vector, vector, top_k),
+                (vec_str, vec_str, top_k),
             )
             return cur.fetchall()
 
