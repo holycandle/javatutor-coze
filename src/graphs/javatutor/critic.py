@@ -24,19 +24,20 @@ def _resolve_model(model):
 
 
 def _invoke(messages, model):
+    """调用 LLM，优先用注入的 model（测试），否则用原始 HTTP 调用。"""
     resolved = _resolve_model(model)
     if resolved is not None:
         return resolved.invoke(messages)
-    from graphs.javatutor.llm import get_chat_model
+    from graphs.javatutor.llm import llm_complete
 
-    client, llm_config = get_chat_model()
-    return client.invoke(
+    raw = llm_complete(
         messages=messages,
-        model=llm_config.model,
         temperature=0.1,
-        top_p=llm_config.top_p or 0.9,
         max_completion_tokens=800,
     )
+    from langchain_core.messages import AIMessage
+
+    return AIMessage(content=raw)
 
 
 def _parse_json(raw: str) -> dict | None:

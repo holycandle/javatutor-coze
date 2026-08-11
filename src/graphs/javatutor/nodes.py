@@ -5,7 +5,6 @@
 
 import json
 import logging
-import os
 import re
 from typing import Literal, Any
 
@@ -13,11 +12,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Send
 
-from coze_coding_utils.log.write_log import request_context
-from coze_coding_utils.runtime_ctx.context import default_headers, new_context
-from coze_coding_dev_sdk import LLMClient, Config, LLMConfig as SDKLLMConfig
-
-from graphs.javatutor.llm import get_chat_model as _get_chat_model
+from graphs.javatutor.llm import llm_complete as _llm_complete
 
 from graphs.javatutor.state import JavaTutorState
 from graphs.javatutor.prompts import (
@@ -30,11 +25,6 @@ from graphs.javatutor.prompts import (
 )
 
 from learning.animation import build_animation_svg, classify_algorithm, _map_tags_to_category
-
-# ── 模型配置 ──────────────────────────────────────────────────────────────────
-
-# _get_chat_model 从 graphs.javatutor.llm 导入，避免循环依赖
-
 
 # ── 去重后处理 & Markdown 规整 ──────────────────────────────────────────────────
 
@@ -241,24 +231,25 @@ def _run_expert(
         model: 可选的 ChatOpenAI 实例（测试时注入 FakeModel）
     """
     messages = _build_expert_messages(state, expert)
+    labels = {"data_query": "数据追问", "concept": "概念讲解", "debug": "错误诊断", "other": "通用助手"}
 
-    resolved = _resolve_model(model)
-    if resolved is not None:
-        response = resolved.invoke(messages)
-        answer = response.content
-    else:
-        client, llm_config = _get_chat_model()
-        response = client.invoke(
-            messages=messages,
-            model=llm_config.model,
-            temperature=llm_config.temperature or 0.7,
-            top_p=llm_config.top_p or 0.9,
-            max_completion_tokens=llm_config.max_completion_tokens or 10000,
-        )
-        answer = response.content
+    try:
+        resolved = _resolve_model(model)
+        if resolved is not None:
+            response = resolved.invoke(messages)
+            answer = response.content
+        else:
+            answer = _llm_complete(
+                messages=messages,
+                temperature=0.7,
+                max_completion_tokens=10000,
+            )
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.warning("Expert LLM call failed (%s), using fallback", exc)
+        answer = "抱歉，回答生成服务暂时不可用，请稍后重试。"
 
     answer = _normalize_md(_deduplicate_answer(answer))
-    labels = {"data_query": "数据追问", "concept": "概念讲解", "debug": "错误诊断", "other": "通用助手"}
     return {"answer": f"【{labels.get(expert, '通用助手')}】{answer}"}
 
 
@@ -307,19 +298,12 @@ def analyze_node(state: JavaTutorState, model: "BaseChatModel | None" = None) ->
             response = model.invoke(_build_analyze_messages(source_code, steps_json))
             raw = response.content if hasattr(response, "content") else str(response)
         else:
-            # 生产模式: 使用 LLMClient
-            client, llm_config = _get_chat_model()
-            ctx = request_context.get() or new_context(method="analyze_node")
-            client = LLMClient(config=client.config, ctx=ctx)
-
-            response = client.invoke(
+            # 生产模式: 使用原始 HTTP 调用（绕过 stream_mode=messages）
+            raw = _llm_complete(
                 messages=_build_analyze_messages(source_code, steps_json),
-                model=llm_config.model,
-                temperature=llm_config.temperature,
-                top_p=llm_config.top_p,
-                max_completion_tokens=llm_config.max_completion_tokens,
+                temperature=0.1,
+                max_completion_tokens=10000,
             )
-            raw = response.content if hasattr(response, "content") else str(response)
         if not isinstance(raw, str):
             raw = str(raw)
 
@@ -393,13 +377,46 @@ def retrieve_knowledge(state: JavaTutorState) -> dict:
         return {"retrieved_chunks": [], "rag_degraded": True}
 
 
+def _strip_leaked_json(text: str) -> str:
+    """移除回答正文中泄露的意图/评审 JSON 片段。
+
+    目标模式：
+    - 开头的 {"intent":...,"confidence":...}
+    - 任意位置的 {"pass":...,"issues":[...]}
+    这些来自中间 LLM 调用，不应出现在最终回答中。
+    """
+    import re as _re
+
+    # 1. 移除开头的意图 JSON（可能被 markdown 代码块包裹）
+    text = _re.sub(
+        r'^\s*(?:```(?:json)?\s*)?\{\s*"intent"\s*:.*?\}\s*(?:```\s*)?',
+        '',
+        text,
+        flags=_re.DOTALL,
+    ).lstrip()
+
+    # 2. 移除任意位置的评审 JSON
+    text = _re.sub(
+        r'(?:```(?:json)?\s*)?\{\s*"pass"\s*:.*?\}\s*(?:```\s*)?',
+        '',
+        text,
+        flags=_re.DOTALL,
+    )
+
+    # 3. 清理多余空行
+    text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
+
+
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
-    返回 {"answer": ..., "decision_trace": ...}（不返回 messages，避免平台回环重发）。
+    返回 {"messages": [AIMessage(content=...)]} 作为唯一流式输出，
+    确保客户端只看到最终回答（含决策痕迹），不泄露中间 LLM 调用内容。
     """
     answer = state.get("revised_answer") or state.get("answer") or "抱歉，我暂时无法回答这个问题。"
     answer = _normalize_md(answer)
+    answer = _strip_leaked_json(answer)
 
     trace = {
         "intent": state.get("intent", "other"),
@@ -416,5 +433,6 @@ def build_final(state: JavaTutorState) -> dict:
         "revise_skipped": state.get("revise_skipped", False),
         "compaction_mode": state.get("compaction_mode", "none"),
     }
-    content = f"{answer}\n\n【决策痕迹】\n{json.dumps(trace, ensure_ascii=False)}"
-    return {"answer": content, "decision_trace": trace}
+    trace_json = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))
+    content = f"{answer}\n\n【决策痕迹】\n{trace_json}"
+    return {"messages": [AIMessage(content=content)], "answer": content, "decision_trace": trace}

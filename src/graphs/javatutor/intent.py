@@ -57,17 +57,13 @@ def classify_intent(question: str, model=None) -> dict[str, Any]:
         response = resolved.invoke(messages)
         raw = response.content
     else:
-        from graphs.javatutor.llm import get_chat_model
+        from graphs.javatutor.llm import llm_complete
 
-        client, llm_config = get_chat_model()
-        response = client.invoke(
+        raw = llm_complete(
             messages=messages,
-            model=llm_config.model,
             temperature=0.1,
-            top_p=llm_config.top_p or 0.9,
             max_completion_tokens=200,
         )
-        raw = response.content
     parsed = _parse_output(raw)
     if parsed is None:
         return {"intent": "other", "confidence": 0.0, "reason": "分类输出非法"}
