@@ -1,4 +1,4 @@
-from learning.knowledge import chunk_text, search_chunks
+from learning.knowledge import _entry_text, chunk_text, search_chunks
 
 
 def test_chunk_text_creates_overlapping_chunks():
@@ -25,3 +25,20 @@ def test_search_filters_by_threshold_and_top_k():
 
 def test_search_empty_query():
     assert search_chunks("") == []
+
+
+def test_entry_text_includes_rich_fields():
+    entry = {
+        "title": "Arrays.sort",
+        "keywords": ["arrays", "sort"],
+        "category": "数组",
+        "explanation": "对数组升序排序。",
+        "complexity": "O(n log n)",
+        "example": "Arrays.sort(a);",
+    }
+    text = _entry_text(entry)
+    assert "Arrays.sort" in text
+    assert "关键词: arrays, sort" in text
+    assert "类别: 数组" in text
+    assert "复杂度: O(n log n)" in text
+    assert "示例: Arrays.sort(a);" in text

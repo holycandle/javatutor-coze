@@ -31,6 +31,22 @@ def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50)
     return chunks
 
 
+def _entry_text(entry: dict[str, Any]) -> str:
+    """把 JSON 语料条目转换为可嵌入的文本。"""
+    parts = [entry.get("title", "")]
+    keywords = entry.get("keywords") or []
+    if keywords:
+        parts.append("关键词: " + ", ".join(keywords))
+    if entry.get("category"):
+        parts.append("类别: " + entry["category"])
+    parts.append(entry.get("explanation", ""))
+    if entry.get("complexity"):
+        parts.append("复杂度: " + entry["complexity"])
+    if entry.get("example"):
+        parts.append("示例: " + entry["example"])
+    return "\n".join(parts)
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """使用 Coze SDK EmbeddingClient 逐条生成向量，dimensions=1024。"""
     from coze_coding_dev_sdk import EmbeddingClient
@@ -95,7 +111,7 @@ def seed_assets(url: str | None = None) -> int:
         elif path.suffix == ".json":
             data = json.loads(path.read_text(encoding="utf-8"))
             for entry in data.get("entries", []):
-                text = f"{entry.get('title', '')}\n{entry.get('explanation', '')}"
+                text = _entry_text(entry)
                 chunks.extend(chunk_text(text, f"知识库: {entry.get('title', path.stem)}"))
     insert_chunks(chunks, url)
     return len(chunks)

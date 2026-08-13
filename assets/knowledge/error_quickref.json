@@ -1,9 +1,201 @@
 {
   "entries": [
-    {"title": "cannot find symbol", "explanation": "变量名或方法名不存在，检查拼写或是否声明。"},
-    {"title": "incompatible types", "explanation": "类型不匹配，例如把字符串赋给了 int。"},
-    {"title": "missing return statement", "explanation": "方法声明了返回值，但某个分支没有 return。"},
-    {"title": "NullPointerException", "explanation": "对 null 对象调用了方法或访问了字段。"},
-    {"title": "ArrayIndexOutOfBoundsException", "explanation": "访问数组时下标越界。"}
+    {
+      "title": "cannot find symbol",
+      "keywords": ["cannot find symbol", "找不到符号"],
+      "category": "编译错误",
+      "explanation": "编译器在当前作用域找不到该名称的变量、方法或类，通常是拼写错误、未声明、作用域外或缺少 import。",
+      "example": "int missing = 0;\nint x = missing;",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "incompatible types",
+      "keywords": ["incompatible types", "类型不兼容"],
+      "category": "编译错误",
+      "explanation": "赋值、传参或返回值的类型不匹配，例如把 String 赋给 int。",
+      "example": "int x = Integer.parseInt(\"1\");",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "missing return statement",
+      "keywords": ["missing return statement", "缺少返回语句"],
+      "category": "编译错误",
+      "explanation": "方法声明了返回值类型，但存在没有 return 的代码路径。",
+      "example": "int f(boolean c) { if (c) { return 1; } return 0; }",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "';' expected",
+      "keywords": ["';' expected", "缺少分号"],
+      "category": "编译错误",
+      "explanation": "语句结束缺少分号，或语句语法不完整。",
+      "example": "int x = 1;",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "variable might not have been initialized",
+      "keywords": ["might not have been initialized", "未初始化"],
+      "category": "编译错误",
+      "explanation": "局部变量在未赋初值的情况下被读取。",
+      "example": "int x = 0;\nSystem.out.println(x);",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "unreachable statement",
+      "keywords": ["unreachable statement", "不可达语句"],
+      "category": "编译错误",
+      "explanation": "return、break、continue 之后的语句永远无法执行。",
+      "example": "删除 return 之后不会执行的代码。",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "method cannot be applied to given types",
+      "keywords": ["cannot be applied to given types", "参数不匹配"],
+      "category": "编译错误",
+      "explanation": "调用方法时参数个数或类型与方法签名不符。",
+      "example": "void g(int a) {}\nvoid f() { g(1); }",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "array required",
+      "keywords": ["array required", "需要数组"],
+      "category": "编译错误",
+      "explanation": "对非数组类型使用了数组下标访问。",
+      "example": "int[] x = new int[1];\nx[0] = 1;",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "class is public, should be declared in a file named",
+      "keywords": ["should be declared in a file named", "类文件名"],
+      "category": "编译错误",
+      "explanation": "public 类必须放在与类名相同的 .java 文件中。",
+      "example": "public class B 定义在 B.java 中。",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "duplicate class",
+      "keywords": ["duplicate class", "重复类"],
+      "category": "编译错误",
+      "explanation": "同一编译单元中声明了同名类。",
+      "example": "只保留一个 A 类定义。",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "illegal start of expression",
+      "keywords": ["illegal start of expression", "非法表达式开始"],
+      "category": "编译错误",
+      "explanation": "表达式写法不完整，例如缺少操作数。",
+      "example": "int x = 1 + 2;",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "reached end of file while parsing",
+      "keywords": ["reached end of file", "文件意外结束"],
+      "category": "编译错误",
+      "explanation": "花括号未闭合，编译器在文件末尾仍在等待语法结构。",
+      "example": "补全缺失的 }。",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "possible lossy conversion",
+      "keywords": ["lossy conversion", "精度丢失"],
+      "category": "编译错误",
+      "explanation": "把取值范围更大的类型隐式转为更小的类型可能丢失精度，需要显式强转。",
+      "example": "long l = 5L;\nint x = (int) l;",
+      "source": "javac 17.0.19 实测",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "NullPointerException",
+      "keywords": ["nullpointerexception", "null pointer", "npe"],
+      "category": "运行时异常",
+      "explanation": "对 null 引用调用方法或访问字段时抛出。",
+      "example": "String s = null;\nSystem.out.println(s.length());",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/NullPointerException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "ArrayIndexOutOfBoundsException",
+      "keywords": ["arrayindexoutofboundsexception", "数组越界"],
+      "category": "运行时异常",
+      "explanation": "数组下标小于 0 或大于等于数组长度时抛出。",
+      "example": "int[] arr = new int[3];\nSystem.out.println(arr[5]);",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ArrayIndexOutOfBoundsException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "StringIndexOutOfBoundsException",
+      "keywords": ["stringindexoutofboundsexception", "字符串越界"],
+      "category": "运行时异常",
+      "explanation": "字符串下标超出 [0, length-1] 范围时抛出。",
+      "example": "System.out.println(\"abc\".charAt(5));",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/StringIndexOutOfBoundsException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "ClassCastException",
+      "keywords": ["classcastexception", "类型转换异常"],
+      "category": "运行时异常",
+      "explanation": "把对象强转为与其运行时类型不兼容的类型时抛出。",
+      "example": "Object o = \"s\";\nInteger i = (Integer) o;",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ClassCastException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "NumberFormatException",
+      "keywords": ["numberformatexception", "数字格式异常"],
+      "category": "运行时异常",
+      "explanation": "字符串无法解析为数字时抛出。",
+      "example": "System.out.println(Integer.parseInt(\"abc\"));",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/NumberFormatException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "ArithmeticException",
+      "keywords": ["arithmeticexception", "除以零"],
+      "category": "运行时异常",
+      "explanation": "整数除法或取余时除数为 0 抛出。",
+      "example": "System.out.println(1 / 0);",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ArithmeticException.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "StackOverflowError",
+      "keywords": ["stackoverflowerror", "栈溢出"],
+      "category": "运行时异常",
+      "explanation": "递归没有终止条件，调用栈被耗尽时抛出。",
+      "example": "void f() { f(); }",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/StackOverflowError.html",
+      "retrieved_at": "2026-08-13"
+    },
+    {
+      "title": "ConcurrentModificationException",
+      "keywords": ["concurrentmodificationexception", "并发修改异常"],
+      "category": "运行时异常",
+      "explanation": "遍历集合期间直接修改集合结构（增删元素）时抛出，应使用迭代器的 remove 或先收集再删除。",
+      "example": "for (String s : l) { l.remove(s); }",
+      "source": "OpenJDK 17 实测",
+      "doc": "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/ConcurrentModificationException.html",
+      "retrieved_at": "2026-08-13"
+    }
   ]
 }
