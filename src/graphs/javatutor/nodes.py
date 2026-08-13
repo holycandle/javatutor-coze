@@ -16,13 +16,17 @@ from graphs.javatutor.llm import llm_complete as _llm_complete
 
 from graphs.javatutor.state import JavaTutorState
 from graphs.javatutor.prompts import (
-    SYSTEM_PROMPT_DATA_QUERY,
-    SYSTEM_PROMPT_CONCEPT,
-    SYSTEM_PROMPT_DEBUG,
     ANIMATE_GUIDE_MESSAGE,
-    SYSTEM_PROMPT_OTHER,
     SYSTEM_PROMPT_ANALYZE,
+    build_system_prompt,
 )
+from graphs.javatutor.prompting.contexts import (
+    build_concept_context,
+    build_data_query_context,
+    build_debug_context,
+    build_other_context,
+)
+from graphs.javatutor.prompting.fewshots import get_few_shots
 
 from learning.animation import build_animation_svg, classify_algorithm, _map_tags_to_category
 
@@ -185,39 +189,20 @@ def route_intent(state: JavaTutorState, model=None) -> dict:
 
 
 def _build_expert_messages(state: JavaTutorState, expert: str) -> list:
-    """构建专家节点的消息列表: 系统提示词 + 上下文."""
-    prompts = {
-        "data_query": SYSTEM_PROMPT_DATA_QUERY,
-        "concept": SYSTEM_PROMPT_CONCEPT,
-        "debug": SYSTEM_PROMPT_DEBUG,
-        "other": SYSTEM_PROMPT_OTHER,
+    """构建专家消息: system = 角色+词汇+契约; human = 上下文+示例."""
+    context_builders = {
+        "data_query": build_data_query_context,
+        "concept": build_concept_context,
+        "debug": build_debug_context,
+        "other": build_other_context,
     }
-    system_prompt = prompts.get(expert, SYSTEM_PROMPT_OTHER)
-
-    # 构建上下文
-    compile_error = state.get("compile_error", "")
-    context_parts = [
-        f"### 用户问题\n{state.get('user_question', '')}",
-        f"\n### 源代码\n```java\n{state.get('source_code', '')}\n```",
-    ]
-    if state.get("has_steps"):
-        context_parts.append(
-            f"\n### 当前步骤 (第 {state.get('current_step_index', 0) + 1} 步)\n"
-            f"- 当前行号: {state.get('current_line', '')}\n"
-            f"- 变量快照: {json.dumps(state.get('current_variables', {}), ensure_ascii=False, indent=2)}"
-        )
-    if compile_error:
-        context_parts.append(f"\n### 编译错误\n{compile_error}")
-
-    # RAG 知识库参考注入
-    chunks = state.get("retrieved_chunks") or []
-    if chunks:
-        refs = "\n".join(f"- {c['source']}: {c['content'][:200]}" for c in chunks)
-        context_parts.append(f"\n### 知识库参考\n{refs}\n回答中如引用知识库内容，必须标注「参考知识库：来源名」。")
-
-    context = "\n".join(context_parts)
-
-    return [SystemMessage(content=system_prompt), HumanMessage(content=context)]
+    system_prompt = build_system_prompt(expert)
+    context = context_builders.get(expert, build_other_context)(state)
+    examples = get_few_shots(expert)
+    human = context
+    if examples:
+        human += "\n\n## 示例\n" + "\n\n".join(examples)
+    return [SystemMessage(content=system_prompt), HumanMessage(content=human)]
 
 
 def _run_expert(
