@@ -19,19 +19,15 @@
 | 路径 | 类型 | 说明 |
 |---|---|---|
 | `.coze` | 文件 | TOML 格式平台配置：entrypoint、python-3.12、dev/deploy 的 build/run/pack 命令 |
-| `scripts/setup.sh` | 脚本 | 依赖安装（DEV: `uv sync`; DEPLOY: `uv export` + `pip install --target`） |
-| `scripts/http_run.sh` | 脚本 | 服务启动（读取 `DEPLOY_RUN_PORT`，激活 `.venv`，执行 `main.py -m http`） |
-| `scripts/pack.sh` | 脚本 | 打包（`uv lock`） |
-| `scripts/load_env.py` / `load_env.sh` | 脚本 | 通过 `coze_workload_identity.Client` 加载项目环境变量 |
-| `scripts/local_run.sh` | 脚本 | 本地 flow/node/agent 模式运行 |
+| `scripts/` | 目录 | 平台外壳脚本目录（`setup.sh`、`http_run.sh`、`pack.sh`、`load_env.py`/`.sh`、`local_run.sh`），禁止修改或新增 |
 | `src/main.py` | 文件 | FastAPI 服务与 HTTP/SSE 协议、lifespan 编译图 |
 | `src/storage/` | 目录 | 数据库引擎、checkpointer、S3 初始化（平台内置） |
 | `src/utils/` | 目录 | 平台内置工具 |
 | `pyproject.toml` 中平台 SDK 版本区间 | — | `coze-coding-utils`、`coze-coding-dev-sdk`、`coze-workload-identity`、`cozeloop` 等 |
 
-> **注意**：`scripts/` 目录允许**新增**业务脚本（如 `seed_knowledge.py`），但不得**修改**上述平台内置脚本。L5 外壳回归仅检测修改，不阻止新增。
+> **注意**：`scripts/` 目录为平台外壳，禁止新增业务脚本。开发工具脚本统一放入 `tools/` 目录（如 `tools/seed_knowledge.py`）。
 
-业务代码只允许新增到：`src/agents/`、`src/graphs/`、`src/tools/`、`src/learning/`、`assets/`、`config/`、`tests/`、`docs/`。
+业务代码只允许新增到：`src/agents/`、`src/graphs/`、`src/tools/`、`src/learning/`、`tools/`、`assets/`、`config/`、`tests/`、`docs/`。
 
 ## 3. 环境一致性规约
 
@@ -49,7 +45,7 @@ uv sync                   # 无锁文件时按 pyproject.toml 解析并生成锁
 ```
 
 2. `uv.lock` 必须提交；禁止手工改锁文件。新增依赖用 `uv add <pkg>`，会自动更新 `pyproject.toml` 和 `uv.lock`。
-3. **Linux 专用依赖必须带平台标记**。当前 `pyproject.toml` 中的 `pycairo`、`dbus-python`、`PyGObject` 是 Linux 专用包，在 Windows/macOS 上无法安装。应添加标记：
+3. **Linux 专用依赖必须带平台标记**。`pyproject.toml` 中的 `pycairo`、`dbus-python`、`PyGObject` 是 Linux 专用包，已添加 `sys_platform == 'linux'` 标记，确保 Windows/macOS 本地 `uv sync` 跳过、Coze Linux 正常安装：
 
 ```toml
 "pycairo==1.29.0 ; sys_platform == 'linux'",
@@ -89,10 +85,13 @@ uv sync                   # 无锁文件时按 pyproject.toml 解析并生成锁
 
 ### 3.4 敏感信息管理
 
-1. `.env`、`coze-local.properties`、真实 token 一律 gitignore（当前 `.gitignore` 已排除 `.env`）。
+1. `.env`、`coze-local.properties`、真实 token 一律 gitignore（`.gitignore` 已排除 `.env` 和 `.logs/`）。
 2. `.env` 文件由 `db.py` 中的 `python-dotenv` 自动加载（`load_dotenv()`），无需额外配置。
-3. 仓库只提交 `.env.example` 模板（如需）。
-4. `.logs/` 目录也应加入 `.gitignore`（当前缺失，需补充）。
+3. 仓库提交 `.env.example` 模板（已创建），开发者复制为 `.env` 后填入真实值：
+
+```bash
+cp .env.example .env
+```
 
 ### 3.5 本地 PostgreSQL
 
@@ -160,12 +159,12 @@ export COZE_PROJECT_TYPE="agent"
 export COZE_INTEGRATION_MODEL_BASE_URL="http://127.0.0.1:9999/v1"
 export COZE_WORKLOAD_IDENTITY_API_KEY="placeholder"
 export PGDATABASE_URL="sqlite:////tmp/javatutor_test.db"
-uv run python -c "from agents.agent import build_agent; g = build_agent().builder.compile(); print('ok')"
+PYTHONPATH=src uv run python -c "from agents.agent import build_agent; g = build_agent().builder.compile(); print('ok')"
 ```
 
 Expected: 输出 `ok`。验证 `build_agent()` 返回值含 `.builder` 且可编译。
 
-> 注意：`PYTHONPATH` 需包含 `src/`（`pyproject.toml` 中 `[tool.pytest.ini_options] pythonpath = ["src"]` 已配置，`uv run` 会自动生效）。
+> `PYTHONPATH=src` 是必需的——`pyproject.toml` 中的 `pythonpath = ["src"]` 仅对 pytest 生效，普通 `python -c` 需手动指定。无 `PGDATABASE_URL` 或连接失败时 checkpointer 自动降级为 MemorySaver，不影响编译验证。
 
 ### L4 本地 HTTP 冒烟
 
@@ -194,13 +193,18 @@ Expected: `/health` 返回 `{"status":"ok"}`；`/graph_parameter` 返回 schema 
 
 ### L5 外壳回归
 
+检查已修改（tracked）和新增（untracked）文件是否落入外壳路径：
+
 ```bash
-git diff --name-only HEAD | grep -E "^(\.coze|scripts/(setup|http_run|pack|load_env|local_run)\.(sh|py)|src/main\.py|src/storage/|src/utils/)"
+# 已修改的 tracked 文件
+git diff --name-only HEAD | grep -E "^(\.coze|scripts/|src/main\.py|src/storage/|src/utils/)"
+# 新增的 untracked 文件
+git status --porcelain | grep '^??' | awk '{print $2}' | grep -E "^(\.coze|scripts/|src/main\.py|src/storage/|src/utils/)"
 ```
 
-Expected: 无输出（外壳未改动）。
+Expected: 两条命令均无输出（外壳未被修改，外壳目录下无新增文件）。
 
-> 此检查仅匹配平台内置脚本，`scripts/` 下新增的业务脚本（如 `seed_knowledge.py`）不触发告警。
+> `scripts/` 整个目录为平台外壳，业务脚本应放入 `tools/`。`src/storage/` 和 `src/utils/` 同理禁止新增业务文件。
 
 ## 6. 提交与推送规约
 
@@ -217,7 +221,7 @@ Expected: 无输出（外壳未改动）。
 uv run pytest tests/ -q
 ```
 
-2. HTTP 层快速验证：按第 5 节 L4 启动本地服务，用 curl 检查 `/health`、`/graph_parameter`、`/v1/chat/completions`；可维护 `scripts/local_client.py` 作为本地冒烟客户端（不属于平台外壳）。
+2. HTTP 层快速验证：按第 5 节 L4 启动本地服务，用 curl 检查 `/health`、`/graph_parameter`、`/v1/chat/completions`；可维护 `tools/local_client.py` 作为本地冒烟客户端。
 
 3. 前端可视化验证：当前 JavaTutor 后端通过 Coze v3 Chat API 调用，本地 Agent 提供 OpenAI 兼容接口，前端不能直接连本地。若需要本地可视化联调，需在 JavaTutor 后端增加 OpenAI 兼容模式（`coze.api.openai-mode=true` + `coze.api.url` 指向本地 Agent），此改造属于 JavaTutor 仓库，不进入本规约的 Coze 侧外壳范围。
 
@@ -237,9 +241,17 @@ uv run pytest tests/ -q
 
 ## 9. 评审与修订
 
-1. 本规约由本地开发组与 Coze 平台侧 Agent 共同评审；修改必须提交远程仓库并记录修订版本。
+1. 本规约由本地开发组与 Coze 平台侧 Agent 共同评审；修改必须提交远程仓库并更新下方版本记录。
 2. 任何与 Coze 平台实测行为冲突的条目，以平台实测为准并回写规约。
 3. 平台 SDK 升级后需重新审查第 2 节外壳契约和第 3 节环境变量。
+
+### 修订记录
+
+| 版本 | 日期 | 变更摘要 |
+|---|---|---|
+| v1.0 | 2026-08-11 | 初版：基于 Coze 平台实测环境编写，涵盖外壳契约、环境变量、验证门槛、部署规约 |
+| v1.1 | 2026-08-11 | 审查修订：`.coze` 文件类型修正；`PGDATABASE_URL` 获取方式修正；补全 `COZE_PROJECT_TYPE`/`COZE_PROJECT_ENV`；`setup.sh` 双路径说明；新增附录 A 平台架构要点 |
+| v1.2 | 2026-08-11 | 本地开发 Agent 反馈修订：① `scripts/` 整个目录列为外壳禁止新增，`seed_knowledge.py` 移至 `tools/`；② `pyproject.toml` Linux 专用依赖补 `sys_platform == 'linux'` 标记；③ 创建 `.env.example` 模板；④ L5 检查改用 `git status --porcelain` 覆盖 untracked 文件；⑤ 新增修订记录表 |
 
 ## 附录 A：平台架构要点（影响业务代码的关键事实）
 

@@ -14,7 +14,7 @@
 | 5. Critic-Revise | `critic.py` | 评论节点评估答案质量，不通过时触发修订节点重写 |
 | 6. 节点增强 | `nodes.py` | `_resolve_model()` 统一模型解析、RAG 分块注入、`build_final` 决策追踪 |
 | 7. 图重写 | `graph.py` | 新流程：parse→compact→route→[RAG→expert→critic→revise→final] |
-| 8. 知识资产 | `assets/knowledge/` | 5 条编译错误 + 5 条标准库条目，种子脚本 `scripts/seed_knowledge.py` |
+| 8. 知识资产 | `assets/knowledge/` | 5 条编译错误 + 5 条标准库条目，种子脚本 `tools/seed_knowledge.py` |
 
 ## 环境修复
 1. **循环导入**：提取 `llm.py` 独立模块，打破 intent.py ↔ nodes.py 循环依赖

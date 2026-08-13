@@ -1,8 +1,8 @@
 """团队语料灌库脚本：读取 assets/knowledge/ 写入 pgvector。
 
 用法:
-  uv run python scripts/seed_knowledge.py            # 全量灌库（同 source 自动去重）
-  uv run python scripts/seed_knowledge.py --stats     # 查看当前知识库统计
+  uv run python tools/seed_knowledge.py            # 全量灌库（同 source 自动去重）
+  uv run python tools/seed_knowledge.py --stats     # 查看当前知识库统计
 """
 
 import argparse

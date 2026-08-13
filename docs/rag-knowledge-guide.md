@@ -67,14 +67,14 @@ Java 中字符串比较必须用 equals() 而不是 ==。
 ### 2. 执行灌库
 
 ```bash
-uv run python scripts/seed_knowledge.py
+uv run python tools/seed_knowledge.py
 ```
 
 ### 3. 验证
 
 ```bash
 # 查看统计
-uv run python scripts/seed_knowledge.py --stats
+uv run python tools/seed_knowledge.py --stats
 
 # 手动测试检索
 uv run python -c "

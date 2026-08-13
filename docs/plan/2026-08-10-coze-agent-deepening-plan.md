@@ -37,7 +37,7 @@
 | `src/graphs/javatutor/prompts.py` | 新增分类/评审/修订提示词（修改） |
 | `src/graphs/javatutor/nodes.py` | 路由改造、检索/压缩/最终节点（修改） |
 | `src/graphs/javatutor/graph.py` | 新链路装配（修改） |
-| `scripts/seed_knowledge.py` | 团队语料灌库脚本 |
+| `tools/seed_knowledge.py` | 团队语料灌库脚本 |
 | `assets/knowledge/error_quickref.json` | 错误速查语料 |
 | `assets/knowledge/java_std.json` | Java 标准库语料 |
 | `tests/test_intent.py` | 意图分类测试 |
@@ -328,7 +328,7 @@ git commit -m "feat: add steps context compaction"
 
 **Files:**
 - Create: `src/learning/knowledge.py`
-- Create: `scripts/seed_knowledge.py`
+- Create: `tools/seed_knowledge.py`
 - Test: `tests/test_knowledge.py`
 
 **Interfaces:**
@@ -506,7 +506,7 @@ def search_chunks(
     ]
 ```
 
-创建 `scripts/seed_knowledge.py`：
+创建 `tools/seed_knowledge.py`：
 
 ```python
 """团队语料灌库脚本：读取 assets/knowledge/ 写入 pgvector。"""
@@ -531,7 +531,7 @@ Expected: 3 passed。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/learning/knowledge.py scripts/seed_knowledge.py tests/test_knowledge.py
+git add src/learning/knowledge.py tools/seed_knowledge.py tests/test_knowledge.py
 git commit -m "feat: add pgvector RAG knowledge retrieval"
 ```
 
@@ -1181,7 +1181,7 @@ git commit -m "feat: wire deepened agent graph with critic-revise loop"
 
 - [ ] **Step 2: 灌库**
 
-Run: `uv run python scripts/seed_knowledge.py`
+Run: `uv run python tools/seed_knowledge.py`
 Expected: 输出 `seeded N chunks`。
 
 - [ ] **Step 3: 全量测试**
