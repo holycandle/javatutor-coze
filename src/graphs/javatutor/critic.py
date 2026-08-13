@@ -56,16 +56,9 @@ def _parse_json(raw: str) -> dict | None:
 
 
 def _facts(state) -> str:
-    chunks = state.get("retrieved_chunks") or []
-    lines = [
-        f"学生问题：{state.get('user_question', '')}",
-        f"当前变量：{state.get('current_variables', {})}",
-        f"编译错误：{state.get('compile_error', '')}",
-        f"步骤数据：{state.get('steps_json', '[]')[:4000]}",
-    ]
-    if chunks:
-        lines.append("检索来源：" + "; ".join(c["source"] for c in chunks))
-    return "\n".join(lines)
+    from graphs.javatutor.prompting.contexts import build_facts_block
+
+    return build_facts_block(state)
 
 
 def critic_node(state, model=None) -> dict[str, Any]:

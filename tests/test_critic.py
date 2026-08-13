@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage
 
 from graphs.javatutor.critic import critic_node, revise_node
+from graphs.javatutor.prompting.contexts import build_facts_block
 
 
 class FakeModel:
@@ -42,3 +43,21 @@ def test_revise_returns_revised():
     out = revise_node(BASE, FakeModel("根据第 2 步，arr[1] 变成了 5"))
     assert out["revised"] is True
     assert out["revised_answer"] == "根据第 2 步，arr[1] 变成了 5"
+
+
+def test_facts_include_heap_stack_output():
+    state = {
+        **BASE,
+        "has_steps": True,
+        "steps": [
+            {"step": 1, "line": 3, "variables": {"arr": [3, 5, 1]}, "heap": {"h1": {"type": "Object"}}, "stackFrames": [{"method": "main"}], "output": "out"}
+        ],
+        "current_step_index": 0,
+        "current_line": 3,
+        "source_code": "public class A {\n    void run() {\n        int x = 1;\n    }\n}",
+    }
+    facts = build_facts_block(state)
+    assert "堆对象" in facts
+    assert "栈帧" in facts
+    assert "输出" in facts
+    assert "int x = 1" in facts
