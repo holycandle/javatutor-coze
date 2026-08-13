@@ -12,6 +12,7 @@ __pycache__/
 *.egg-info/
 /.env
 .env
+.logs/
 .cozeproj/reduction
 
 # 视频文件
