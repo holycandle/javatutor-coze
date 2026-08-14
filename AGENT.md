@@ -41,6 +41,7 @@
 4. 实现记录：`docs/devlog/YYYY-MM-DD-<topic>.md`。
 5. 文件统一 UTF-8；文件名只允许字母、数字、下划线、短横线。
 6. 文档内容不得出现 `TBD` / `TODO` 占位；未定的内容先定方案再写。
+7. Review 内容除非过短（少于一条有效结论），必须撰写 review 日志到 `docs/reviews/YYYY-MM-DD-<topic>-review.md`，并在本文件登记。
 7. 完成完整新功能或修复重大 bug 后，必须撰写开发日志 `docs/devlog/YYYY-MM-DD-<topic>.md`，记录改动内容、验证结果与遗留问题；开发日志随功能一起提交，并在本文件登记。
 
 ## 协作规则（摘要）
