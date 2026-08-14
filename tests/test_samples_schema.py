@@ -11,13 +11,14 @@ def _load_jsonl(name):
 
 def test_golden_set_schema():
     rows = _load_jsonl("golden_set.jsonl")
-    assert len(rows) >= 5
+    assert len(rows) >= 10  # 至少 10 条带 expected_tool_calls，支撑 tool_call_accuracy 统计
     for row in rows:
         assert row["id"]
         assert row["bucket"] in ("data_query", "concept", "debug", "other", "analyze", "edge")
         assert isinstance(row["payload"], dict)
         assert row["expected_intent"]
         assert isinstance(row["expected_facts"], list)
+        assert isinstance(row["expected_tool_calls"], list)
         assert isinstance(row["judge_priority"], bool)
 
 

@@ -54,3 +54,25 @@ uv run pytest tests/test_eval_remote.py tests/test_eval_report.py tests/test_eva
 - 扩充含 `expected_tool_calls` 的黄金样本。
 - `summarize` 支持自动合并 `extended`。
 - 架构改进实现后跑首轮端到端基线。
+
+## 第二轮 Review（2026-08-14）
+
+### 验证结果
+
+```text
+uv run pytest tests/test_eval_remote.py tests/test_eval_report.py tests/test_eval_component.py tests/test_judge.py tests/test_samples_schema.py tests/test_intent_rules.py -v
+=> 20 passed
+```
+
+### 修复确认
+
+| 上轮发现 | 状态 |
+|---|---|
+| chat_remote SSE 分片解析缺测试 | ✅ 已补 `test_chat_remote_concatenates_sse_chunks` |
+| summarize 未自动合并扩展指标 | ✅ 已加 `extended` 参数并合并 |
+| avg_token_usage 缺样本分母 | ✅ 已加 `token_usage_sample_count` |
+| 黄金集 expected_tool_calls 样本不足 | ❌ 仍未扩充：当前 6 条、仅 q01 带工具期望 |
+
+### 结论
+
+3/4 项已修复，测试全部通过。剩余 1 项（黄金集扩充）为数据工程任务，建议在端到端基线前补齐：至少 10 条带 `expected_tool_calls` 的样本，覆盖 `step_facts` 正确调用、参数缺失、误调用三类场景。

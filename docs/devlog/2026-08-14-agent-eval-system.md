@@ -31,11 +31,12 @@
 - P2-1：补 `chat_remote` SSE mock 测试（多分片拼接 / 非 answer 跳过 / [DONE] 终止）。
 - P3-1：`summarize` 新增可选参数 `extended`，自动合并扩展指标进 `e2e` 字典，减少漏合并风险。
 - P3-2：`compute_extended_metrics` 新增 `token_usage_sample_count`，标明 `avg_token_usage` 实际样本分母。
-- 待办（依赖架构改进/平台）：P2-2 扩充含 `expected_tool_calls` 黄金样本；P3-3 remote payload 以真实 Coze API 实测校验。
+- P2-2（第二轮）：黄金集由 6 条扩至 12 条，全部带 `expected_tool_calls`：正确调用 3（q01/q07/q08）、参数缺失 1（q09）、误调用/无调用 8（q02-q06/q10-q12）；`test_golden_set_schema` 固化 ≥10 条 + 字段必填。
+- 待办（依赖平台实测）：P3-3 remote payload 以真实 Coze API 实测校验。
 
 ## 遗留问题
 - 端到端（remote mode / Judge）需在 Coze 平台执行并消耗积分，本地已完成 runner 与指标实现与单测，未产出真实端到端评分。
-- 黄金集当前 6 条为起步样本，后续按 spec 扩充至 30-50 条并人工评审。
+- 黄金集当前 12 条（含 3 条正确工具调用），后续按 spec 扩充至 30-50 条并人工评审。
 - `eval/archive/` 目录结构与存档脚本（date/round/summary 编排）尚未落地，随首次端到端运行完善。
 
 ## 关键文件
