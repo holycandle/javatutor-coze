@@ -31,6 +31,15 @@ def test_write_summary(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8")) == {"e2e": {}}
 
 
+def test_summarize_merges_extended():
+    judged = [{"id": "q01", "score": 5, "judgement": "correct", "scores": {"grounding": 5}}]
+    extended = {"tool_call_accuracy": 1.0, "avg_latency": 2.0}
+    summary = summarize(judged, component={"pass_rate": 0.9}, extended=extended)
+    assert summary["e2e"]["tool_call_accuracy"] == 1.0
+    assert summary["e2e"]["avg_latency"] == 2.0
+    assert summary["e2e"]["avg_score"] == 5.0
+
+
 def test_compute_extended_metrics():
     from eval.runner.report import compute_extended_metrics
 
@@ -54,3 +63,4 @@ def test_compute_extended_metrics():
     assert m["task_success_rate"] == 1.0
     assert m["avg_latency"] == 2.0
     assert m["avg_token_usage"] == 150
+    assert m["token_usage_sample_count"] == 1

@@ -23,9 +23,15 @@
 - `pyproject.toml`：pytest `pythonpath` 由 `["src"]` 扩为 `["src", "."]`，使仓库根下 `eval/` 包可被测试导入。
 
 ## 验证结果
-- 全量测试 **113/113 通过**（95 既有 + 18 新增：schema 2 / intent_rules 6 / component 1 / judge 4 / report 4 / remote 1）。
+- 全量测试 **115/115 通过**（95 既有 + 20 新增：schema 2 / intent_rules 6 / component 1 / judge 4 / report 5 / remote 2）。
 - L1 `uv sync --frozen` ✅；L3 离线构建输出 `ok` ✅；L5 外壳回归无输出 ✅。
 - 组件级评估样本用例 `pass_rate = 1.0`，符合 L2.5 门槛。
+
+## Review 修复（`docs/reviews/2026-08-14-eval-system-m11-review.md`）
+- P2-1：补 `chat_remote` SSE mock 测试（多分片拼接 / 非 answer 跳过 / [DONE] 终止）。
+- P3-1：`summarize` 新增可选参数 `extended`，自动合并扩展指标进 `e2e` 字典，减少漏合并风险。
+- P3-2：`compute_extended_metrics` 新增 `token_usage_sample_count`，标明 `avg_token_usage` 实际样本分母。
+- 待办（依赖架构改进/平台）：P2-2 扩充含 `expected_tool_calls` 黄金样本；P3-3 remote payload 以真实 Coze API 实测校验。
 
 ## 遗留问题
 - 端到端（remote mode / Judge）需在 Coze 平台执行并消耗积分，本地已完成 runner 与指标实现与单测，未产出真实端到端评分。

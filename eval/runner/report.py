@@ -13,21 +13,24 @@ def load_jsonl(path) -> list[dict]:
     return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def summarize(judged: list[dict], component: dict | None = None) -> dict:
+def summarize(judged: list[dict], component: dict | None = None, extended: dict | None = None) -> dict:
     parsed = [j for j in judged if not j.get("judge_parse_error")]
     total = len(parsed)
     avg_score = round(sum(j.get("score", 0) for j in parsed) / total, 4) if total else 0.0
     grounding = [j.get("scores", {}).get("grounding", 0) for j in parsed]
     grounding_avg = round(sum(grounding) / len(grounding), 4) if grounding else 0.0
+    e2e = {
+        "avg_score": avg_score,
+        "grounding_avg": grounding_avg,
+        "total": total,
+        "correct": sum(1 for j in parsed if j.get("judgement") == "correct"),
+        "partially_correct": sum(1 for j in parsed if j.get("judgement") == "partially_correct"),
+        "incorrect": sum(1 for j in parsed if j.get("judgement") == "incorrect"),
+    }
+    if extended:
+        e2e.update(extended)
     return {
-        "e2e": {
-            "avg_score": avg_score,
-            "grounding_avg": grounding_avg,
-            "total": total,
-            "correct": sum(1 for j in parsed if j.get("judgement") == "correct"),
-            "partially_correct": sum(1 for j in parsed if j.get("judgement") == "partially_correct"),
-            "incorrect": sum(1 for j in parsed if j.get("judgement") == "incorrect"),
-        },
+        "e2e": e2e,
         "component": component or {},
         "diff_vs_previous": {},
     }
@@ -69,8 +72,8 @@ def _tool_call_ok(expected: list, actual: list) -> bool:
 def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: list[dict]) -> dict:
     """M1.1 扩展指标：tool_call_accuracy / task_success_rate / avg_latency / avg_token_usage。
 
-    调用方在端到端跑完后，将返回值与 ``summarize()`` 结果的 ``e2e`` 字典合并：
-    ``summary["e2e"].update(compute_extended_metrics(outputs, samples, judged))``。
+    返回值与 ``summarize(..., extended=...)`` 合并进 summary 的 ``e2e`` 字典；
+    ``token_usage_sample_count`` 用于标明 avg_token_usage 的实际样本分母。
     """
     by_id = {s["id"]: s for s in samples}
     tc_total = tc_ok = 0
@@ -101,4 +104,5 @@ def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: l
         "task_success_rate": _safe(task_ok, task_total),
         "avg_latency": round(sum(latency) / len(latency), 3) if latency else 0.0,
         "avg_token_usage": round(sum(tokens) / len(tokens), 1) if tokens else 0,
+        "token_usage_sample_count": len(tokens),
     }
