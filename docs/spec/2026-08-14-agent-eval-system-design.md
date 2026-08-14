@@ -32,7 +32,9 @@
 - **D-07**：端到端门槛 = 相关改动必须提供本轮均分与上一轮对比；均分下降 > 0.3 或 Grounding 下降 > 0.5 禁止合入。
 - **D-08**：bad case 与 correct case 原样存档，作为未来微调数据。
 - **D-09**：意图识别采用保守关键词 + 显式 intent（非 LLM），作为上下文优先级信号；intent_accuracy 按此规则评测。
-- **D-10**：端到端只在 Coze 平台消耗积分，本地不跑真实 LLM。
+- **D-10**：端到端评测采用 remote mode，通过已部署智能体 Chat API 采集回答（remote mode），本地不需要模型端点、数据库与 embedding。
+- **D-11**：端到端新增指标：`tool_call_accuracy`（工具调用准确率）、`task_success_rate`（任务完成率，回答通过 Judge 且命中全部硬事实）、`avg_latency`（平均耗时）、`avg_token_usage`（平均 token 消耗）。
+- **D-12**：`tool_call_accuracy` 与 `token_usage` 依赖决策痕迹中的 `tool_calls` / `token_usage` 字段（见接口契约）。
 
 ## 4. Architecture & Components
 
@@ -73,6 +75,7 @@ eval/
   "expected_intent": "data_query",
   "expected_facts": ["step=2", "line=4", "arr[1]=5"],
   "expected_sources": ["知识库: HashMap"],
+  "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}],
   "judge_priority": true
 }
 ```
@@ -85,6 +88,7 @@ eval/
 - `expected_intent`：保守关键词分类器的期望意图。
 - `expected_facts`：回答必须引用的真实事实（步骤/行/变量/堆 id/输出）。
 - `expected_sources`：可选，期望检索来源。
+- `expected_tool_calls`：可选，期望主 Agent 调用的工具与参数。
 - `judge_priority`：是否进入端到端评测。
 
 ### 5.2 component_cases.jsonl
@@ -111,7 +115,7 @@ eval/
   "model": "doubao-seed-2-0-lite-260215",
   "round": 1,
   "component": {"intent_accuracy": 0.9, "citation_accuracy": 0.85, "critic_recall": 1.0, "rag_hit_at_3": 0.8, "pass_rate": 0.95},
-  "e2e": {"avg_score": 4.2, "grounding_avg": 4.0, "total": 30, "correct": 24, "partially_correct": 4, "incorrect": 2},
+  "e2e": {"avg_score": 4.2, "grounding_avg": 4.0, "total": 30, "correct": 24, "partially_correct": 4, "incorrect": 2, "tool_call_accuracy": 0.9, "task_success_rate": 0.8, "avg_latency": 2.3, "avg_token_usage": 1800},
   "diff_vs_previous": {}
 }
 ```

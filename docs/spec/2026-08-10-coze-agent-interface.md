@@ -60,7 +60,11 @@
   "rag_degraded": false,
   "critic_skipped": false,
   "revise_skipped": false,
-  "compaction_mode": "none|windowed|truncated"
+  "compaction_mode": "none|windowed|truncated",
+  "tool_calls": [
+    {"tool": "step_facts", "args": {"step_index": 1}}
+  ],
+  "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "estimated": true}
 }
 ```
 
@@ -78,6 +82,8 @@
 | `critic_skipped` | boolean | 评审调用失败时为 `true` |
 | `revise_skipped` | boolean | 修订调用失败时为 `true` |
 | `compaction_mode` | string | `none`（≤200 步）、`windowed`（压缩成功）、`truncated`（压缩失败后截断） |
+| `tool_calls` | array | 主 Agent 工具循环实际执行的工具调用记录，元素含 `tool` 与 `args`；用于评测工具调用准确率 |
+| `token_usage` | object | 本次回答的 token 消耗：`prompt_tokens`、`completion_tokens`、`estimated`（true 表示估算值）；用于评测成本 |
 
 ## 4. 正文引用格式
 

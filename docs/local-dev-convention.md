@@ -27,7 +27,7 @@
 
 > **注意**：`scripts/` 目录为平台外壳，禁止新增业务脚本。开发工具脚本统一放入 `tools/` 目录（如 `tools/seed_knowledge.py`）。
 
-业务代码只允许新增到：`src/agents/`、`src/graphs/`、`src/tools/`、`src/learning/`、`tools/`、`assets/`、`config/`、`tests/`、`docs/`。
+业务代码只允许新增到：`src/agents/`、`src/graphs/`、`src/tools/`、`src/learning/`、`eval/`、`tools/`、`assets/`、`config/`、`tests/`、`docs/`。
 
 ## 3. 环境一致性规约
 
@@ -151,6 +151,16 @@ uv run pytest tests/ -v
 
 Expected: 全部通过。
 
+### L2.5 组件级评估
+
+```bash
+uv run pytest tests/test_eval_component.py -v
+```
+
+Expected: 全部通过；`pass_rate = 1.0`。
+
+端到端评估：prompt/上下文/记忆/工具相关改动提交时，PR 说明必须附本轮与上一轮 Judge 均分对比；均分下降 > 0.3 或 Grounding 下降 > 0.5 禁止合入。
+
 ### L3 离线构建验证
 
 ```bash
@@ -252,6 +262,7 @@ uv run pytest tests/ -q
 | v1.0 | 2026-08-11 | 初版：基于 Coze 平台实测环境编写，涵盖外壳契约、环境变量、验证门槛、部署规约 |
 | v1.1 | 2026-08-11 | 审查修订：`.coze` 文件类型修正；`PGDATABASE_URL` 获取方式修正；补全 `COZE_PROJECT_TYPE`/`COZE_PROJECT_ENV`；`setup.sh` 双路径说明；新增附录 A 平台架构要点 |
 | v1.2 | 2026-08-11 | 本地开发 Agent 反馈修订：① `scripts/` 整个目录列为外壳禁止新增，`seed_knowledge.py` 移至 `tools/`；② `pyproject.toml` Linux 专用依赖补 `sys_platform == 'linux'` 标记；③ 创建 `.env.example` 模板；④ L5 检查改用 `git status --porcelain` 覆盖 untracked 文件；⑤ 新增修订记录表 |
+| v1.3 | 2026-08-14 | 评估系统门槛：① 新增 L2.5 组件级评估（`test_eval_component.py` 全过、`pass_rate=1.0`）；② 端到端评估要求提交时附 Judge 均分对比，均分下降 >0.3 或 Grounding 下降 >0.5 禁止合入；③ 业务代码允许目录新增 `eval/` |
 
 ## 附录 A：平台架构要点（影响业务代码的关键事实）
 
