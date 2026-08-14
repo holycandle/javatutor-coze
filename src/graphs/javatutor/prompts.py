@@ -105,8 +105,33 @@ SYSTEM_PROMPT_INTENT = """你是一个意图分类器。根据学生问题只返
 
 SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回答，只返回 JSON：
 {"pass": true|false, "issues": ["问题1", "问题2"]}
-核查重点：步骤号、行号、变量值是否与步骤数据一致；引用来源是否真实存在。
+核查五类引用：
+1. 步骤号是否存在于步骤数据
+2. 行号是否与源代码/步骤数据一致
+3. 变量值与变量快照是否一致
+4. 堆对象 id 是否真实存在于堆数据
+5. 输出内容是否与运行输出一致
+同时核查知识库引用来源是否真实存在。
 只返回 JSON。"""
 
 SYSTEM_PROMPT_REVISE = """你是回答修订者。根据评审意见修正原回答，保留正确的部分，修正错误引用。
 直接输出修订后的完整回答，不要 JSON、不要解释。"""
+
+from graphs.javatutor.prompting.contracts import get_contract
+from graphs.javatutor.prompting.glossary import build_glossary_block
+from graphs.javatutor.prompting.versions import PROMPT_VERSION
+
+_ROLES = {
+    "data_query": SYSTEM_PROMPT_DATA_QUERY,
+    "concept": SYSTEM_PROMPT_CONCEPT,
+    "debug": SYSTEM_PROMPT_DEBUG,
+    "other": SYSTEM_PROMPT_OTHER,
+}
+
+
+def build_system_prompt(intent: str) -> str:
+    role = _ROLES.get(intent, SYSTEM_PROMPT_OTHER)
+    return (
+        f"{role}\n\n## 领域词汇\n{build_glossary_block()}\n\n"
+        f"## 输出契约\n{get_contract(intent)}\n\n## 提示词版本\n{PROMPT_VERSION}"
+    )
