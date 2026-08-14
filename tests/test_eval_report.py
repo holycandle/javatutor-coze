@@ -29,3 +29,28 @@ def test_write_summary(tmp_path):
     path = tmp_path / "summary.json"
     write_summary(str(path), {"e2e": {}})
     assert json.loads(path.read_text(encoding="utf-8")) == {"e2e": {}}
+
+
+def test_compute_extended_metrics():
+    from eval.runner.report import compute_extended_metrics
+
+    outputs = [
+        {
+            "id": "q01",
+            "answer": "第 2 步 arr[1]=5",
+            "latency": 2.0,
+            "decision_trace": {
+                "tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}],
+                "token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "estimated": True},
+            },
+        }
+    ]
+    samples = [
+        {"id": "q01", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}], "expected_facts": ["step=2", "arr[1]=5"]}
+    ]
+    judged = [{"id": "q01", "judgement": "correct"}]
+    m = compute_extended_metrics(outputs, samples, judged)
+    assert m["tool_call_accuracy"] == 1.0
+    assert m["task_success_rate"] == 1.0
+    assert m["avg_latency"] == 2.0
+    assert m["avg_token_usage"] == 150

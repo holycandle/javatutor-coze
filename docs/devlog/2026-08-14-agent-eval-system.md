@@ -15,23 +15,26 @@
 | 5. e2e runner | `eval/runner/e2e_runner.py` | Coze 平台跑黄金集完整链路，产出回答 + decision_trace |
 | 5. 报告 | `eval/runner/report.py` | summary 汇总（均分/grounding/分布）与轮次 diff |
 | 6. 门槛集成 | `docs/local-dev-convention.md` | 新增 L2.5 组件级评估门槛；业务代码允许目录新增 `eval/` |
+| 7. remote mode（M1.1） | `eval/runner/e2e_remote.py` | 通过已部署智能体 Chat API 采集回答，无需本地模型/数据库/embedding；解析决策痕迹 |
+| 7. 扩展指标（M1.1） | `eval/runner/report.py` | `compute_extended_metrics`：tool_call_accuracy / task_success_rate / avg_latency / avg_token_usage |
+| 7. 黄金集扩展（M1.1） | `eval/samples/golden_set.jsonl` | q01 补充 `expected_tool_calls`（依赖接口契约决策痕迹新字段） |
 
 ## 环境与配置调整
 - `pyproject.toml`：pytest `pythonpath` 由 `["src"]` 扩为 `["src", "."]`，使仓库根下 `eval/` 包可被测试导入。
 
 ## 验证结果
-- 全量测试 **111/111 通过**（95 既有 + 16 新增：schema 2 / intent_rules 6 / component 1 / judge 4 / report 3）。
+- 全量测试 **113/113 通过**（95 既有 + 18 新增：schema 2 / intent_rules 6 / component 1 / judge 4 / report 4 / remote 1）。
 - L1 `uv sync --frozen` ✅；L3 离线构建输出 `ok` ✅；L5 外壳回归无输出 ✅。
 - 组件级评估样本用例 `pass_rate = 1.0`，符合 L2.5 门槛。
 
 ## 遗留问题
-- 端到端 runner 与 Judge 需在 Coze 平台执行并消耗积分，本轮仅在本地完成组件级验证，未产出真实端到端评分。
+- 端到端（remote mode / Judge）需在 Coze 平台执行并消耗积分，本地已完成 runner 与指标实现与单测，未产出真实端到端评分。
 - 黄金集当前 6 条为起步样本，后续按 spec 扩充至 30-50 条并人工评审。
 - `eval/archive/` 目录结构与存档脚本（date/round/summary 编排）尚未落地，随首次端到端运行完善。
 
 ## 关键文件
 - `eval/samples/golden_set.jsonl`、`eval/samples/component_cases.jsonl`
-- `eval/runner/component_metrics.py`、`eval/runner/e2e_runner.py`、`eval/runner/judge.py`、`eval/runner/report.py`
+- `eval/runner/component_metrics.py`、`eval/runner/e2e_runner.py`、`eval/runner/e2e_remote.py`、`eval/runner/judge.py`、`eval/runner/report.py`
 - `eval/judge_prompt.md`
 - `src/graphs/javatutor/intent_rules.py`
 - `docs/local-dev-convention.md`（L2.5）

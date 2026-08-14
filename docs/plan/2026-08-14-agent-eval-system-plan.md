@@ -710,6 +710,240 @@ git commit -m "docs: add component eval gate to local dev convention"
 
 ---
 
+### Task 7（M1.1 新增）: remote mode 与扩展指标
+
+> 本任务为原计划完成后的扩展，标注为新增；不改变 Task 1-6 既有实现。
+
+**Files:**
+- Modify: `eval/samples/golden_set.jsonl`（新增 `expected_tool_calls`）
+- Create: `eval/runner/e2e_remote.py`
+- Modify: `eval/runner/report.py`
+- Modify: `tests/test_eval_remote.py`（新建）
+- Modify: `tests/test_eval_report.py`
+- 依赖：决策痕迹已按接口契约新增 `tool_calls` / `token_usage`。
+
+**Interfaces:**
+- Produces: `parse_decision_trace(text) -> dict|None`、`chat_remote(sample, api_url, token, project_id, timeout=120) -> dict`、`run_remote_golden_set(samples, api_url, token, project_id, out_path=None) -> list[dict]`、`compute_extended_metrics(outputs, samples, judged) -> dict`。
+
+- [ ] **Step 1: 黄金集补充 expected_tool_calls**
+
+将 `eval/samples/golden_set.jsonl` 的 q01 行替换为：
+
+```json
+{"id": "q01", "bucket": "data_query", "payload": {"source_code": "public class A { void f() { int[] arr = {5,3,1}; arr[1] = 3; } }", "steps": [{"step": 1, "line": 3, "variables": {"arr": [5, 3, 1]}}, {"step": 2, "line": 4, "variables": {"arr": [3, 5, 1]}}], "current_step_index": 1, "current_line": 4, "user_question": "为什么第 2 步 arr[1] 变成了 5？", "compile_error": ""}, "expected_intent": "data_query", "expected_facts": ["step=2", "line=4", "arr[1]=5"], "expected_sources": [], "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}], "judge_priority": true}
+```
+
+- [ ] **Step 2: 写失败测试（remote）**
+
+创建 `tests/test_eval_remote.py`：
+
+```python
+from eval.runner.e2e_remote import parse_decision_trace
+
+
+def test_parse_decision_trace_extracts_new_fields():
+    text = '回答\n\n【决策痕迹】\n{"tool_calls":[{"tool":"step_facts","args":{"step_index":1}}],"token_usage":{"prompt_tokens":100,"completion_tokens":50,"estimated":true}}'
+    trace = parse_decision_trace(text)
+    assert trace["tool_calls"][0]["tool"] == "step_facts"
+    assert trace["tool_calls"][0]["args"]["step_index"] == 1
+    assert trace["token_usage"]["completion_tokens"] == 50
+    assert trace["token_usage"]["estimated"] is True
+```
+
+- [ ] **Step 3: 运行测试确认失败**
+
+Run: `uv run pytest tests/test_eval_remote.py -v`
+Expected: FAIL，`ModuleNotFoundError`。
+
+- [ ] **Step 4: 实现 e2e_remote**
+
+创建 `eval/runner/e2e_remote.py`：
+
+```python
+"""remote mode（M1.1 新增）：通过已部署智能体 Chat API 采集回答。"""
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+
+def parse_decision_trace(text: str) -> dict[str, Any] | None:
+    marker = "\n【决策痕迹】\n"
+    idx = (text or "").rfind(marker)
+    if idx < 0:
+        return None
+    raw = text[idx + len(marker):].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def chat_remote(
+    sample: dict,
+    api_url: str,
+    token: str,
+    project_id: str,
+    timeout: int = 120,
+) -> dict[str, Any]:
+    payload = {
+        "content": {"query": {"prompt": [{"type": "text", "content": {"text": json.dumps(sample["payload"], ensure_ascii=False)}}]}},
+        "type": "query",
+        "session_id": sample.get("id", ""),
+        "project_id": project_id,
+    }
+    headers = {"Authorization": f"Bearer {token}"}
+    start = time.time()
+    full: list[str] = []
+    with httpx.stream("POST", api_url, json=payload, headers=headers, timeout=timeout) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if not line or not line.startswith("data:"):
+                continue
+            data_str = line[5:].strip()
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("event") == "message" and chunk.get("message", {}).get("type") == "answer":
+                full.append(chunk["message"].get("content", ""))
+    latency = round(time.time() - start, 3)
+    answer = "".join(full)
+    return {"id": sample.get("id"), "answer": answer, "latency": latency, "decision_trace": parse_decision_trace(answer)}
+
+
+def run_remote_golden_set(
+    samples: list[dict],
+    api_url: str,
+    token: str,
+    project_id: str,
+    out_path: str | Path | None = None,
+) -> list[dict]:
+    outputs = [chat_remote(s, api_url, token, project_id) for s in samples if s.get("judge_priority")]
+    if out_path:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text("\n".join(json.dumps(o, ensure_ascii=False) for o in outputs), encoding="utf-8")
+    return outputs
+```
+
+- [ ] **Step 5: 扩展指标（report.py 新增）**
+
+在 `eval/runner/report.py` 追加：
+
+```python
+from graphs.javatutor.intent_rules import fact_matches
+
+
+def _safe(num: int, den: int) -> float:
+    return round(num / den, 4) if den else 0.0
+
+
+def _tool_call_ok(expected: list, actual: list) -> bool:
+    expected = expected or []
+    actual = actual or []
+    if len(expected) != len(actual):
+        return False
+
+    def norm(calls):
+        return sorted((c.get("tool"), json.dumps(c.get("args", {}), sort_keys=True)) for c in calls)
+
+    return norm(expected) == norm(actual)
+
+
+def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: list[dict]) -> dict:
+    by_id = {s["id"]: s for s in samples}
+    tc_total = tc_ok = 0
+    latency: list[float] = []
+    tokens: list[int] = []
+    for out in outputs:
+        sample = by_id.get(out.get("id"), {})
+        expected = sample.get("expected_tool_calls")
+        if expected is not None:
+            tc_total += 1
+            tc_ok += int(_tool_call_ok(expected, (out.get("decision_trace") or {}).get("tool_calls")))
+        if out.get("latency") is not None:
+            latency.append(out["latency"])
+        usage = (out.get("decision_trace") or {}).get("token_usage") or {}
+        if usage:
+            tokens.append(int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0)))
+    task_total = task_ok = 0
+    for j in judged:
+        if j.get("judge_parse_error"):
+            continue
+        sample = by_id.get(j.get("id"), {})
+        out = next((o for o in outputs if o.get("id") == j.get("id")), {})
+        facts_ok = all(fact_matches(f, out.get("answer", "")) for f in sample.get("expected_facts", []))
+        task_total += 1
+        task_ok += int(j.get("judgement") == "correct" and facts_ok)
+    return {
+        "tool_call_accuracy": _safe(tc_ok, tc_total),
+        "task_success_rate": _safe(task_ok, task_total),
+        "avg_latency": round(sum(latency) / len(latency), 3) if latency else 0.0,
+        "avg_token_usage": round(sum(tokens) / len(tokens), 1) if tokens else 0,
+    }
+```
+
+将 `summarize` 的返回中 `e2e` 字典追加扩展指标：
+
+```python
+        "e2e": {
+            **existing_e2e,
+            **compute_extended_metrics([], [], []),  # 由调用方合并 outputs/samples/judged 后覆盖
+        },
+```
+
+实际执行时调用方先计算 `extended = compute_extended_metrics(outputs, samples, judged)`，再与 `summarize` 结果合并写入 summary。
+
+- [ ] **Step 6: 写失败测试（扩展指标）**
+
+在 `tests/test_eval_report.py` 追加：
+
+```python
+def test_compute_extended_metrics():
+    from eval.runner.report import compute_extended_metrics
+
+    outputs = [
+        {
+            "id": "q01",
+            "answer": "第 2 步 arr[1]=5",
+            "latency": 2.0,
+            "decision_trace": {
+                "tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}],
+                "token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "estimated": True},
+            },
+        }
+    ]
+    samples = [
+        {"id": "q01", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}], "expected_facts": ["step=2", "arr[1]=5"]}
+    ]
+    judged = [{"id": "q01", "judgement": "correct"}]
+    m = compute_extended_metrics(outputs, samples, judged)
+    assert m["tool_call_accuracy"] == 1.0
+    assert m["task_success_rate"] == 1.0
+    assert m["avg_latency"] == 2.0
+    assert m["avg_token_usage"] == 150
+```
+
+- [ ] **Step 7: 运行测试确认通过**
+
+Run: `uv run pytest tests/test_eval_remote.py tests/test_eval_report.py -v`
+Expected: 全部通过。
+
+- [ ] **Step 8: 提交（由团队自行执行）**
+
+```bash
+git add eval/runner/e2e_remote.py eval/runner/report.py eval/samples/golden_set.jsonl tests/test_eval_remote.py tests/test_eval_report.py
+git commit -m "feat: add remote mode and extended eval metrics"
+```
+
+---
+
 ## Self-Review
 
 ### Spec Coverage
@@ -723,6 +957,9 @@ git commit -m "docs: add component eval gate to local dev convention"
 | 端到端 runner | Task 5 |
 | summary 与 diff | Task 5 |
 | 验证门槛 | Task 6 |
+| remote mode（M1.1） | Task 7 |
+| tool_call_accuracy / task_success_rate（M1.1） | Task 7 |
+| avg_latency / avg_token_usage（M1.1） | Task 7 |
 
 ### Placeholder Scan
 
