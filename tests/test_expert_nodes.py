@@ -205,3 +205,17 @@ class TestExpertNodes:
         messages = _build_expert_messages(state, "concept")
         assert "知识库参考" in messages[1].content
         assert "知识库: HashMap" in messages[1].content
+
+    def test_system_prompt_contains_glossary_contract_version(self):
+        from graphs.javatutor.prompts import build_system_prompt
+
+        prompt = build_system_prompt("data_query")
+        assert "术语表" in prompt
+        assert "输出契约" in prompt
+        assert "提示词版本" in prompt
+
+    def test_expert_message_contains_few_shot_marker(self):
+        from graphs.javatutor.nodes import _build_expert_messages
+
+        messages = _build_expert_messages(BASE_STATE, "data_query")
+        assert "（示例" in messages[1].content
