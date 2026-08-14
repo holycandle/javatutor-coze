@@ -45,8 +45,9 @@
 - **D-17**：Compress 超预算按分区截断或摘要，标注 `[...已压缩...]`。
 - **D-18**：项目知识 RAG 使用同一向量表，`source` 标记“知识库: JavaTutor项目”，每次文本问答额外检索 top-3。
 - **D-19**：主 Agent 工具循环最多 3 轮；中间 LLM 调用一律使用 `llm_complete()`，避免流式泄露。
-- **D-20**：评审五类核查（步骤号、行号、变量值、堆 id、输出）与决策痕迹保留。
+- **D-20**：评审五类核查（步骤号、行号、变量值、堆 id、输出）与决策痕迹保留；决策痕迹新增 `tool_calls` 与 `token_usage`，供端到端评测读取。
 - **D-21**：`build_agent()` / `AgentBundle` 契约不变。
+- **D-22**：主 Agent 工具循环每轮记录 `tool_calls`（实际执行的工具与参数）；中间 LLM 调用通过 `llm_complete()` 返回或估算 token 用量，写入 `token_usage`。
 
 ## 4. Architecture
 
@@ -133,6 +134,18 @@ CREATE INDEX IF NOT EXISTS idx_session_memories_session
 ### 5.5 项目知识语料
 
 `assets/knowledge/javatutor_project.json`，条目含 `title / keywords / category / explanation / example / source / retrieved_at`，`source` 统一为“知识库: JavaTutor项目”。
+
+### 5.6 决策痕迹扩展字段
+
+```json
+{
+  "tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}],
+  "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "estimated": true}
+}
+```
+
+- `tool_calls`：主 Agent 工具循环实际执行的调用记录。
+- `token_usage`：本次回答全部 LLM 调用的 token 消耗；无法取得精确值时置 `estimated=true`。
 
 ## 6. Error Handling
 

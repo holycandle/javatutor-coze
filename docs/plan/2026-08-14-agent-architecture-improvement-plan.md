@@ -903,6 +903,7 @@ def test_main_agent_calls_step_facts_then_answers():
     model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"])
     out = main_agent_node(STATE, model=model)
     assert out["tool_rounds"] == 2
+    assert out["tool_calls"] == [{"tool": "step_facts", "args": {"step_index": 1}}]
     assert "x 变成了 2" in out["answer"]
 
 
@@ -974,6 +975,7 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     context = state.get("context_built", "")
     rounds = 0
     answer = ""
+    tool_calls = []
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
@@ -986,12 +988,13 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
             answer = resp
             break
         if tool["tool"] == "step_facts":
+            tool_calls.append({"tool": "step_facts", "args": tool.get("args", {})})
             result = step_facts(state, **tool.get("args", {}))
             context += f"\n\n[step_facts 结果]\n{json.dumps(result, ensure_ascii=False)}"
         else:
             answer = resp
             break
-    return {"answer": answer, "tool_rounds": rounds}
+    return {"answer": answer, "tool_rounds": rounds, "tool_calls": tool_calls}
 ```
 
 - [ ] **Step 5: 运行测试确认通过**
