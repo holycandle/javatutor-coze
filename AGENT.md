@@ -13,8 +13,8 @@
 | 文档 | 状态 |
 |---|---|
 | 本地开发规约 v1.2 | 生效 |
-| 评估系统 spec | 已写，待评审 |
-| 评估系统 plan | 已写，待执行 |
+| 评估系统 spec | 已执行 |
+| 评估系统 plan | 已执行 |
 | 架构改进 spec | 已写，待评审 |
 | 架构改进 plan | 已写，待执行 |
 
@@ -31,6 +31,7 @@
 | 架构改进计划 | `docs/plan/2026-08-14-agent-architecture-improvement-plan.md` | 架构改进 TDD 实施计划 |
 | RAG 指南 | `docs/rag-knowledge-guide.md` | 语料格式与灌库说明 |
 | 实现记录 | `docs/devlog/YYYY-MM-DD-<topic>.md` | 每次实现变更的流水记录 |
+| 评估系统实现 | `docs/devlog/2026-08-14-agent-eval-system.md` | 双轨评估系统实现记录 |
 
 ## 文档规范
 
