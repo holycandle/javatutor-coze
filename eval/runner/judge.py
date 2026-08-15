@@ -1,6 +1,11 @@
-"""LLM-as-Judge：按 judge_prompt.md 对端到端回答评分。"""
+"""LLM-as-Judge：按 judge_prompt.md 对端到端回答评分。
+
+默认使用独立的 DeepSeek 端点（环境变量 JUDGE_API_URL / JUDGE_API_KEY / JUDGE_MODEL），
+不经过 Coze integration 端点；密钥只在环境变量或本地 .env 中提供，不写入代码。
+"""
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -38,14 +43,52 @@ def parse_judge_output(raw: str) -> dict[str, Any] | None:
     return data
 
 
+def _messages_to_openai(messages) -> list[dict[str, str]]:
+    role_map = {"system": "system", "human": "user", "ai": "assistant"}
+    result = []
+    for msg in messages:
+        role = role_map.get(msg.type, "user")
+        content = msg.content
+        if isinstance(content, list):
+            texts = [
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            content = "\n".join(texts)
+        result.append({"role": role, "content": str(content)})
+    return result
+
+
+def judge_complete(messages) -> str:
+    """调用 DeepSeek 兼容 chat completions 接口返回完整文本。"""
+    import httpx
+
+    api_url = os.getenv("JUDGE_API_URL", "https://api.deepseek.com").rstrip("/")
+    api_key = os.getenv("JUDGE_API_KEY", "")
+    model = os.getenv("JUDGE_MODEL", "deepseek-chat")
+    if not api_key:
+        raise RuntimeError("JUDGE_API_KEY 未配置，请在本地 .env 中填写 DeepSeek Key")
+    payload = {
+        "model": model,
+        "messages": _messages_to_openai(messages),
+        "temperature": 0.1,
+        "max_tokens": 500,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    resp = httpx.post(f"{api_url}/chat/completions", json=payload, headers=headers, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
 def judge_answer(sample: dict, answer: str, model=None) -> dict[str, Any]:
     try:
         if model is not None:
             raw = model.invoke(build_judge_messages(sample, answer)).content
         else:
-            from graphs.javatutor.llm import llm_complete
-
-            raw = llm_complete(build_judge_messages(sample, answer), temperature=0.1, max_completion_tokens=500)
+            raw = judge_complete(build_judge_messages(sample, answer))
         parsed = parse_judge_output(raw)
         if parsed is None:
             return {"id": sample.get("id"), "judge_parse_error": True}
