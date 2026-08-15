@@ -52,18 +52,27 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     analysis = state.get("analysis_result")
     if analysis:
         packets.append(ContextPacket(f"### 分析结果\n{json.dumps(analysis, ensure_ascii=False)[:500]}", relevance_score=0.9, metadata={"section": "Evidence"}))
-    if state.get("has_steps"):
+    has_position = bool(state.get("has_steps")) or (
+        state.get("current_step_index") not in (None, 0)
+        or state.get("current_line") not in (None, 0)
+    )
+    if has_position:
         index = state.get("current_step_index", 0)
         try:
             display_index = int(index) + 1
         except (TypeError, ValueError):
             display_index = index
+        total_steps_text = (
+            f"- 总步骤数: {state.get('steps_count', 0)}"
+            if state.get("has_steps")
+            else "- 总步骤数: 未提供（步骤数据缺失）"
+        )
         packets.append(
             ContextPacket(
                 f"### 当前执行位置\n"
                 f"- 当前步骤索引: {index}（展示为第 {display_index} 步）\n"
                 f"- 当前行号: {state.get('current_line', '')}\n"
-                f"- 总步骤数: {state.get('steps_count', 0)}",
+                f"{total_steps_text}",
                 relevance_score=0.9,
                 metadata={"section": "Evidence"},
             )

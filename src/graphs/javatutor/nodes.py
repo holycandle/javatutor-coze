@@ -134,6 +134,7 @@ def _parse_json_dict(data: dict) -> dict:
             else conservative_intent(user_question, compile_error)
         ),
         "algorithm_tags": algorithm_tags,
+        "fallback_reason": "",
     }
 
 
