@@ -52,6 +52,22 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     analysis = state.get("analysis_result")
     if analysis:
         packets.append(ContextPacket(f"### 分析结果\n{json.dumps(analysis, ensure_ascii=False)[:500]}", relevance_score=0.9, metadata={"section": "Evidence"}))
+    if state.get("has_steps"):
+        index = state.get("current_step_index", 0)
+        try:
+            display_index = int(index) + 1
+        except (TypeError, ValueError):
+            display_index = index
+        packets.append(
+            ContextPacket(
+                f"### 当前执行位置\n"
+                f"- 当前步骤索引: {index}（展示为第 {display_index} 步）\n"
+                f"- 当前行号: {state.get('current_line', '')}\n"
+                f"- 总步骤数: {state.get('steps_count', 0)}",
+                relevance_score=0.9,
+                metadata={"section": "Evidence"},
+            )
+        )
     for m in memories or []:
         packets.append(
             ContextPacket(m.get("content", ""), timestamp=float(m.get("created_at", time.time())), relevance_score=0.5 + float(m.get("importance", 0.5)) * 0.4, metadata={"section": "Memory"})

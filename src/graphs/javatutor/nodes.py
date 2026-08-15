@@ -356,6 +356,8 @@ def _strip_leaked_json(text: str) -> str:
 
     # 3. 清理多余空行
     text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+    # 4. 移除结尾的工具调用 JSON（模型未执行工具时可能直接输出）
+    text = _re.sub(r'\n*\s*\{\s*"tool"\s*:.*?\}\s*$', '', text, flags=_re.DOTALL)
     return text
 
 
@@ -451,6 +453,12 @@ def save_session(state: JavaTutorState) -> dict:
             import json
 
             store.add(session_id, "上次分析：" + json.dumps(analysis, ensure_ascii=False)[:500], importance=0.85)
+        for memory in (state.get("step_memories") or [])[-5:]:
+            store.add(
+                session_id,
+                f"步骤查询：第 {memory.get('step_index')} 步 -> {memory.get('content', '')[:400]}",
+                importance=float(memory.get("importance", 0.8)),
+            )
     except Exception:
         pass
     return {}

@@ -48,6 +48,7 @@
 - **D-20**：评审五类核查（步骤号、行号、变量值、堆 id、输出）与决策痕迹保留；决策痕迹新增 `tool_calls` 与 `token_usage`，供端到端评测读取。
 - **D-21**：`build_agent()` / `AgentBundle` 契约不变。
 - **D-22**：主 Agent 工具循环每轮记录 `tool_calls`（实际执行的工具与参数）；中间 LLM 调用通过 `llm_complete()` 返回或估算 token 用量，写入 `token_usage`。
+- **D-23**：单步执行证据的数据来源锁定为 `step_facts` 工具；工具成功结果写入工作记忆（importance 0.8，最多保留 5 条），随 ContextBuilder 的记忆分区注入后续上下文；GSSC 上下文只提供当前执行位置元数据（步骤索引/行号/总步骤数），不直接注入完整变量证据。
 
 ## 4. Architecture
 

@@ -41,6 +41,20 @@ def test_main_agent_stops_after_three_rounds():
     model = SequenceModel(['{"tool": "step_facts", "args": {}}'] * 5)
     out = main_agent_node(STATE, model=model)
     assert out["tool_rounds"] == 3
+
+
+def test_main_agent_records_step_memories():
+    model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"])
+    out = main_agent_node(STATE, model=model)
+    assert len(out["step_memories"]) == 1
+    assert out["step_memories"][0]["importance"] == 0.8
+    assert "diff" in out["step_memories"][0]["content"]
+
+
+def test_main_agent_tool_error_does_not_record_memory():
+    model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 99}}', "无法查询，但上下文有分析结果"])
+    out = main_agent_node(STATE, model=model)
+    assert out["step_memories"] == []
     # 3 轮全是工具调用、无最终回答时兜底
     assert out["answer"]
 

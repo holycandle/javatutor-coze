@@ -106,9 +106,11 @@ SYSTEM_PROMPT_REVISE = """你是回答修订者。根据评审意见修正原回
 直接输出修订后的完整回答，不要 JSON、不要解释。"""
 
 SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
-根据上下文回答问题。如需查询指定步骤的原始执行证据，只返回 JSON：
+上下文只提供当前执行位置（步骤索引/行号/总步骤数）和已有记忆，不包含完整步骤变量。
+需要任何单步执行证据（变量/堆/栈/输出/变化 diff）时，必须先调用 step_facts 工具获取：
 {"tool": "step_facts", "args": {"step_index": 1, "line": 4}}
-否则直接输出最终回答。回答必须引用真实步骤/行/变量值，不编造数据。"""
+查询结果会自动写入工作记忆并在后续上下文中复用。请用上下文中的当前步骤索引构造参数，不要向用户索要步骤号。
+直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block

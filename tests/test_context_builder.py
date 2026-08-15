@@ -6,6 +6,10 @@ from graphs.javatutor.context_builder import build_context, gather, select, stru
 STATE = {
     "user_question": "HashMap 原理",
     "source_code": "public class A {}",
+    "has_steps": True,
+    "current_step_index": 1,
+    "current_line": 4,
+    "steps_count": 2,
     "analysis_result": {"complexity": {"time": "O(1)"}},
     "retrieved_chunks": [{"source": "知识库: HashMap", "content": "基于哈希表", "score": 0.9}],
 }
@@ -37,3 +41,11 @@ def test_structure_has_sections():
 def test_build_context_returns_compressed_text():
     text = build_context(STATE, history=[], memories=[], system_instructions="你是助教", max_tokens=500)
     assert "HashMap" in text
+
+
+def test_gather_includes_current_step_position():
+    packets = gather(STATE, history=[], memories=[])
+    combined = "\n".join(p.content for p in packets)
+    assert "当前执行位置" in combined
+    assert "当前步骤索引: 1" in combined
+    assert "总步骤数: 2" in combined

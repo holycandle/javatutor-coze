@@ -47,6 +47,7 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     rounds = 0
     answer = ""
     tool_calls = []
+    step_memories = []
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
@@ -70,6 +71,15 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
             except TypeError as exc:
                 # 参数含未知键或非法类型时给出结构化错误，而不是中断循环
                 result = {"error": f"step_facts 参数非法: {exc}", "evidence": {}, "diff": []}
+            if not result.get("error"):
+                step_memories.append(
+                    {
+                        "step_index": args.get("step_index", state.get("current_step_index", 0)),
+                        "content": json.dumps(result, ensure_ascii=False)[:600],
+                        "importance": 0.8,
+                    }
+                )
+                step_memories = step_memories[-5:]
             context += f"\n\n[step_facts 结果]\n{json.dumps(result, ensure_ascii=False)}"
         else:
             # 未知工具：提示不可用，继续让主 Agent 直接回答，而不是把 JSON 当最终答案
@@ -77,4 +87,4 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
             context += f"\n\n[工具 {tool['tool']} 不可用，请直接回答]"
     if not answer:
         answer = "抱歉，我暂时无法回答这个问题。"
-    return {"answer": answer, "tool_rounds": rounds, "tool_calls": tool_calls}
+    return {"answer": answer, "tool_rounds": rounds, "tool_calls": tool_calls, "step_memories": step_memories}
