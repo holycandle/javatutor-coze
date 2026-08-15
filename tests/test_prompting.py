@@ -37,3 +37,11 @@ def test_contracts_require_grounding():
     assert "哪一步" in get_contract("data_query")
     assert "行号" in get_contract("debug")
     assert "源代码" in get_contract("concept")
+
+
+def test_no_animation_prompt_constant():
+    """动画相关提示词常量已移除."""
+    import graphs.javatutor.prompts as prompts
+
+    assert not hasattr(prompts, "SYSTEM_PROMPT_ANIMATE")
+    assert not hasattr(prompts, "ANIMATE_GUIDE_MESSAGE")

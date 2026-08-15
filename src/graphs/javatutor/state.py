@@ -54,17 +54,14 @@ class JavaTutorState(TypedDict, total=False):
 
     # === 意图路由 ===
     intent: str
-    """意图识别结果: data_query | concept | debug | animate | other."""
+    """意图识别结果: data_query | concept | debug | analyze | other."""
 
     algorithm_tags: list
-    """analyze 专家返回的算法/数据结构标签列表，用于动画分类优先."""
+    """analyze 专家返回的算法/数据结构标签列表."""
 
     # === 专家回答 ===
     answer: str
     """最终回答文本，由专家节点填充."""
-
-    svg_text: str
-    """动画分支生成的 SVG 文本，非动画分支为空字符串."""
 
     # === 深化链路状态 ===
     intent_confidence: float
@@ -105,3 +102,22 @@ class JavaTutorState(TypedDict, total=False):
 
     revised: bool
     """是否已修订."""
+
+    # === 新架构字段 ===
+    analysis_result: dict
+    """analyze_code 确定性节点产生的复杂度/算法/数据结构分析结果."""
+
+    memories: list[dict]
+    """会话工作记忆中检索到的历史记忆."""
+
+    context_built: str
+    """GSSC 构建后的最终上下文文本."""
+
+    tool_rounds: int
+    """主 Agent 工具循环执行的轮数."""
+
+    tool_calls: list
+    """主 Agent 工具循环实际执行的工具调用记录（含 tool 与 args），用于评测工具调用准确率."""
+
+    token_usage: dict
+    """本次回答的 token 消耗：prompt_tokens / completion_tokens / estimated."""

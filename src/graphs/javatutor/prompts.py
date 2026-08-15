@@ -56,8 +56,6 @@ SYSTEM_PROMPT_OTHER = """你是一位耐心的 Java 编程助手。
 - 如果完全无法回答，说明原因并建议用户提供更多信息
 - 不要假装知道你不确定的事情""" + _MARKDOWN_RULES
 
-ANIMATE_GUIDE_MESSAGE = "动画生成请在界面点击「生成动画」按钮，我会基于本次运行数据为你生成可视化。直接在聊天里输入暂时不会触发动画。"
-
 SYSTEM_PROMPT_ANALYZE = """你是一位资深的 Java 代码分析专家，擅长分析代码的时间复杂度、空间复杂度、使用的算法和数据结构。
 
 ## 职责
@@ -93,16 +91,6 @@ SYSTEM_PROMPT_ANALYZE = """你是一位资深的 Java 代码分析专家，擅�
 - 时间复杂度/空间复杂度格式使用标准的大O表示法
 """
 
-SYSTEM_PROMPT_INTENT = """你是一个意图分类器。根据学生问题只返回 JSON：
-{"intent": "data_query|concept|debug|animate_guide|other", "confidence": 0-1, "reason": "一句话"}
-分类规则：
-- data_query：追问执行步骤中的变量值、变量变化、运行结果
-- concept：询问算法、数据结构、复杂度、概念原理
-- debug：报错、异常、如何修复
-- animate_guide：请求生成动画、演示、可视化
-- other：其他
-只返回 JSON，不要 Markdown 围栏。"""
-
 SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回答，只返回 JSON：
 {"pass": true|false, "issues": ["问题1", "问题2"]}
 核查五类引用：
@@ -116,6 +104,11 @@ SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回
 
 SYSTEM_PROMPT_REVISE = """你是回答修订者。根据评审意见修正原回答，保留正确的部分，修正错误引用。
 直接输出修订后的完整回答，不要 JSON、不要解释。"""
+
+SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
+根据上下文回答问题。如需查询指定步骤的原始执行证据，只返回 JSON：
+{"tool": "step_facts", "args": {"step_index": 1, "line": 4}}
+否则直接输出最终回答。回答必须引用真实步骤/行/变量值，不编造数据。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block

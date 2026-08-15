@@ -15,8 +15,8 @@
 | 本地开发规约 v1.2 | 生效 |
 | 评估系统 spec | 已执行 |
 | 评估系统 plan | 已执行 |
-| 架构改进 spec | 已写，待评审 |
-| 架构改进 plan | 已写，待执行 |
+| 架构改进 spec | 已评审 |
+| 架构改进 plan | 已执行 |
 
 ## 规约与文档索引
 
@@ -34,6 +34,8 @@
 | 评估系统实现 | `docs/devlog/2026-08-14-agent-eval-system.md` | 双轨评估系统实现记录 |
 | 评估系统 review | `docs/reviews/2026-08-14-eval-system-review.md` | 评估系统首轮审查 |
 | 评估系统 M1.1 review | `docs/reviews/2026-08-14-eval-system-m11-review.md` | remote mode 与扩展指标审查 |
+| 架构改进实现 | `docs/devlog/2026-08-15-agent-architecture-improvement.md` | 多工具架构重构实现记录 |
+| 架构改进 review | `docs/reviews/2026-08-15-agent-architecture-improve-review.md` | 架构改进首轮审查（2 P1 / 2 P2 / 2 P3 已修复） |
 
 ## 文档规范
 

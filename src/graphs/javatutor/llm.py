@@ -1,4 +1,4 @@
-"""共享 LLM 客户端工厂，避免 intent.py ↔ nodes.py 循环导入。
+"""共享 LLM 客户端工厂，避免节点模块 ↔ nodes.py 循环导入。
 
 提供两种调用方式：
 - get_chat_model(): 返回 LLMClient（内部使用 ChatOpenAI，会被 stream_mode=messages 拦截）
