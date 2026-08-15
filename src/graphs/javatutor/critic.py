@@ -55,6 +55,13 @@ def _parse_json(raw: str) -> dict | None:
         return None
 
 
+def _as_bool(value) -> bool:
+    """兼容布尔值与字符串：'true'/'false' 均按文本解析，避免 bool('false') 误判为通过。"""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() == "true"
+
+
 def _facts(state) -> str:
     from graphs.javatutor.prompting.contexts import build_facts_block
 
@@ -73,7 +80,7 @@ def critic_node(state, model=None) -> dict[str, Any]:
             return {"critic_passed": True, "critic_feedback": "", "critic_skipped": True}
         issues = parsed.get("issues", []) if isinstance(parsed.get("issues"), list) else []
         return {
-            "critic_passed": bool(parsed.get("pass", False)),
+            "critic_passed": _as_bool(parsed.get("pass", False)),
             "critic_feedback": json.dumps(issues, ensure_ascii=False),
             "critic_skipped": False,
         }

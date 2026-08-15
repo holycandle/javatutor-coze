@@ -33,6 +33,12 @@ def test_critic_fails_with_issues():
     assert "变量值" in out["critic_feedback"]
 
 
+def test_critic_string_false_is_not_pass():
+    out = critic_node(BASE, FakeModel('{"pass": "false", "issues": ["代码行引用错误"]}'))
+    assert out["critic_passed"] is False
+    assert "代码行引用错误" in out["critic_feedback"]
+
+
 def test_critic_skips_on_bad_output():
     out = critic_node(BASE, FakeModel("not json"))
     assert out["critic_passed"] is True

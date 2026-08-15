@@ -36,7 +36,6 @@
 | 评估系统 M1.1 review | `docs/reviews/2026-08-14-eval-system-m11-review.md` | remote mode 与扩展指标审查 |
 | 架构改进实现 | `docs/devlog/2026-08-15-agent-architecture-improvement.md` | 多工具架构重构实现记录 |
 | 架构改进 review | `docs/reviews/2026-08-15-agent-architecture-improve-review.md` | 架构改进首轮审查（2 P1 / 2 P2 / 2 P3 已修复） |
-| 单步问答链路修复 | `docs/devlog/2026-08-15-chat-step-context-fix.md` | 聊天链路 steps 传递与上下文位置注入修复 |
 
 ## 文档规范
 

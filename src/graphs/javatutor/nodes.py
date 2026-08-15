@@ -64,8 +64,16 @@ def _normalize_md(text: str) -> str:
     text = re.sub(r'(^|\n)(#{1,6})(?=[^\s#\n])', r'\1\2 ', text)
 
     # 2. 代码块围栏后紧跟非换行内容 → 围栏后插换行
-    #   匹配 ``` 或 ```java 等围栏，后跟非换行字符
-    text = re.sub(r'(```\w*)([^\n])', r'\1\n\2', text)
+    #   只拆「围栏 + 同行内容」的情况；围栏后已是换行（含 ```jav 截断）保持原样，
+    #   避免把 ```jav 拆成 ```ja + v 导致单字符残留
+    def _fix_fence_line(match):
+        fence = match.group(1)
+        rest = match.group(2).strip()
+        if not rest:
+            return match.group(0)
+        return fence + "\n" + rest
+
+    text = re.sub(r'^(```\w*)(.*)$', _fix_fence_line, text, flags=re.MULTILINE)
 
     # 3. 分隔线 --- 与文字粘连 → 前后插换行
     #   行内 --- 两侧有非换行字符 → 在 --- 前后插换行
@@ -362,6 +370,32 @@ def _strip_leaked_json(text: str) -> str:
     return text
 
 
+def _sanitize_code_quotes(text: str) -> str:
+    """清理模型引用代码行时的常见残留。
+
+    实测模型会输出 ```jav（java 截断）以及代码块内多余的单字符行（如 a），
+    这里做确定性兜底：归一 java 语言标签，删除代码块开头的单字符残留行。
+    """
+    import re as _re
+
+    text = _re.sub(r'```j(?:av[a-z]*)?\b', '```java', text, flags=_re.IGNORECASE)
+
+    lines = text.split('\n')
+    out = []
+    in_code = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            in_code = not in_code
+            out.append(line)
+            continue
+        if in_code and len(out) > 0 and out[-1].strip().startswith('```'):
+            if _re.fullmatch(r'[A-Za-z0-9_]\s*', line):
+                continue
+        out.append(line)
+    return '\n'.join(out)
+
+
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
@@ -370,6 +404,7 @@ def build_final(state: JavaTutorState) -> dict:
     """
     answer = state.get("revised_answer") or state.get("answer") or "抱歉，我暂时无法回答这个问题。"
     answer = _normalize_md(answer)
+    answer = _sanitize_code_quotes(answer)
     answer = _strip_leaked_json(answer)
 
     trace = {

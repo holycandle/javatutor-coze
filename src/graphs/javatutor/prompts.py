@@ -10,8 +10,10 @@ _MARKDOWN_RULES = """
    for (int i = 0; i < n; i++) { ... }
    ```
    即 ```java 之后换行、代码逐行换行、``` 之前换行，不能把代码挤在 ```java 同一行。
+   语言必须写全 `java`，禁止 `jav` / `j` 等缩写。
 4. 列表「- 项目」中「-」与文字间有空格，列表项之间换行。
-5. 段落之间用空行分隔。"""
+5. 段落之间用空行分隔。
+6. 引用 `step_facts` 返回的 `line_text` 时必须原样输出，不得在代码行前添加任何多余字符（如单独一行的 `a`）。"""
 
 SYSTEM_PROMPT_DATA_QUERY = """你是一位专业的 Java 编程教育专家，擅长通过执行步骤讲解变量变化和数据流动。
 
@@ -99,6 +101,7 @@ SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回
 3. 变量值与变量快照是否一致
 4. 堆对象 id 是否真实存在于堆数据
 5. 输出内容是否与运行输出一致
+6. 引用的代码行是否与 `step_facts` 的 `line_text` 完全一致：不允许代码块中出现多余的单字符行，代码块语言标签必须为 `java`。
 同时核查知识库引用来源是否真实存在。
 只返回 JSON。"""
 
@@ -110,7 +113,8 @@ SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
 需要任何单步执行证据（变量/堆/栈/输出/变化 diff）时，必须先调用 step_facts 工具获取：
 {"tool": "step_facts", "args": {"step_index": 1, "line": 4}}
 查询结果会自动写入工作记忆并在后续上下文中复用。请用上下文中的当前步骤索引构造参数，不要向用户索要步骤号。
-直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。"""
+直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。
+引用代码行时严格使用 `step_facts` 返回的 `line_text` 原文，代码块语言固定为 `java`，禁止在代码行前添加多余字符。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block
