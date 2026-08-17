@@ -113,3 +113,36 @@ class TestParseContext:
         state = parse_context(raw_str)
 
         assert state["steps_json"] == json.dumps(raw["steps"], ensure_ascii=False)
+
+
+def test_parse_context_derives_conservative_intent():
+    """无显式 intent 时，parse_context 用保守规则派生意图."""
+    from langchain_core.messages import HumanMessage
+
+    payload = {
+        "source_code": "public class A {}",
+        "steps": [],
+        "current_step_index": 0,
+        "current_line": 1,
+        "user_question": "为什么 arr 变了？",
+        "compile_error": "",
+    }
+    state = {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]}
+    out = parse_context(state)
+    assert out["intent"] == "data_query"
+
+
+def test_parse_context_explicit_intent_wins():
+    """显式 intent 优先，不走保守派生."""
+    from langchain_core.messages import HumanMessage
+
+    payload = {
+        "source_code": "public class A {}",
+        "steps": [],
+        "user_question": "为什么 arr 变了？",
+        "compile_error": "",
+        "intent": "concept",
+    }
+    state = {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]}
+    out = parse_context(state)
+    assert out["intent"] == "concept"

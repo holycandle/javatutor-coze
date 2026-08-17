@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {"title": "JavaTutor 产品能力", "keywords": ["javatutor", "产品", "面板"], "category": "项目知识", "explanation": "JavaTutor 是 Java 算法可视化教学工具，包含编辑、运行、单步播放、变量快照、堆/栈、控制流、控制台、算法可视化与 AI 讲解面板。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
+    {"title": "Agent 能力边界", "keywords": ["agent", "能力", "职责"], "category": "项目知识", "explanation": "Agent 负责基于真实执行数据讲解代码；不直接替学生写完整作业；算法动画由前端算法可视化提供，Agent 不生成 SVG。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
+    {"title": "算法可视化引导", "keywords": ["动画", "可视化", "演示"], "category": "项目知识", "explanation": "学生请求动画/演示时，引导其使用前端「算法可视化」按钮；Agent 不生成动画。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
+    {"title": "复杂度分析", "keywords": ["复杂度", "算法标签", "analyze"], "category": "项目知识", "explanation": "每次运行代码后，Agent 会自动执行复杂度与算法/数据结构标签分析，结果供后续问答复用。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"}
+  ]
+}

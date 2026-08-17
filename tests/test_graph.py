@@ -20,22 +20,19 @@ class TestGraphAssembly:
         assert bundle.builder is not None
 
     def test_build_flow_graph_structure(self):
-        """build_flow_graph() 返回 StateGraph，包含所有节点（含深化节点）."""
+        """build_flow_graph() 返回 StateGraph，包含新链路全部节点."""
         graph = build_flow_graph()
         assert isinstance(graph, StateGraph)
         assert "parse_context" in graph.nodes
         assert "context_compaction" in graph.nodes
-        assert "route_intent" in graph.nodes
+        assert "analyze_code" in graph.nodes
+        assert "load_session" in graph.nodes
         assert "retrieve_knowledge" in graph.nodes
-        assert "data_query" in graph.nodes
-        assert "concept" in graph.nodes
-        assert "debug" in graph.nodes
-        assert "animate" in graph.nodes
-        assert "animate_guide" in graph.nodes
-        assert "other" in graph.nodes
-        assert "analyze" in graph.nodes
+        assert "build_context" in graph.nodes
+        assert "main_agent" in graph.nodes
         assert "critic" in graph.nodes
         assert "revise" in graph.nodes
+        assert "save_session" in graph.nodes
         assert "final" in graph.nodes
 
     def test_full_flow_compile_error(self):
@@ -53,6 +50,21 @@ class TestGraphAssembly:
         result = compiled.invoke(initial)
         assert result.get("intent") == "debug", f"期望 intent=debug, 实际={result.get('intent')}"
         assert result.get("answer"), "answer 不应为空"
+
+    def test_graph_has_new_pipeline_nodes(self):
+        """新链路节点已装配."""
+        graph = build_flow_graph()
+        for node in ("analyze_code", "load_session", "retrieve_knowledge", "build_context", "main_agent", "save_session"):
+            assert node in graph.nodes
+
+    def test_graph_wires_retrieve_knowledge_before_build_context(self):
+        """P1-2: RAG 检索节点必须位于 build_context 之前，进入上下文."""
+        graph = build_flow_graph()
+        assert "retrieve_knowledge" in graph.nodes
+        assert "build_context" in graph.nodes
+        # retrieve_knowledge 位于 load_session 与 build_context 之间
+        assert ("load_session", "retrieve_knowledge") in graph.edges
+        assert ("retrieve_knowledge", "build_context") in graph.edges
 
     def test_full_flow_analyze(self):
         """全流程: intent=analyze 时路由到 analyze 专家, 返回结构化 JSON."""
@@ -78,41 +90,62 @@ class TestGraphAssembly:
         except json.JSONDecodeError:
             pass
 
-    def test_full_flow_animate_explicit(self):
-        """全流程: intent=animate 时路由到 animate 专家, 返回 SVG."""
-        payload = {
-            "source_code": "public class BubbleSort {}",
-            "steps": [{"step": 0, "variables": {"arr": [5, 3, 1]}}, {"step": 1, "variables": {"arr": [3, 5, 1]}}],
-            "current_step_index": 1,
-            "user_question": "",
-            "compile_error": "",
-            "intent": "animate",
-        }
-        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
-        compiled = build_agent().builder.compile()
-        result = compiled.invoke(initial)
-        ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
-        assert ai_msgs, "应有 AI 消息"
-        assert ai_msgs[-1].content.startswith("<svg"), "animate 应返回纯 SVG"
-        assert "<animate" in ai_msgs[-1].content, "SVG 应包含动画"
-        assert result.get("svg_text", "").startswith("<svg"), "svg_text 应为 SVG"
+    def test_graph_has_no_animation_nodes(self):
+        """图中不应存在 animate / animate_guide 节点（动画模块已移除）."""
+        graph = build_flow_graph()
+        assert "animate" not in graph.nodes
+        assert "animate_guide" not in graph.nodes
 
-    def test_full_flow_animate_guide_explicit(self):
-        """全流程: 显式 intent=animate_guide 返回引导文案."""
-        payload = {
-            "source_code": "public class BubbleSort {}",
-            "steps": [{"step": 0, "variables": {"arr": [5, 3, 1]}}],
-            "current_step_index": 0,
-            "user_question": "",
-            "compile_error": "",
-            "intent": "animate_guide",
-        }
-        initial = {"messages": [HumanMessage(content=json.dumps(payload))]}
-        compiled = build_agent().builder.compile()
-        result = compiled.invoke(initial)
-        assert result.get("intent") == "animate_guide"
-        ai_msgs = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
-        assert ai_msgs and "生成动画" in ai_msgs[-1].content
+def test_retrieve_knowledge_node():
+    """P1-2: retrieve_knowledge 节点返回 chunks 且失败时不抛异常."""
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    out = retrieve_knowledge({"user_question": "冒泡排序复杂度是多少？", "context_summary": ""})
+    assert "retrieved_chunks" in out
+    assert out["rag_degraded"] in (True, False)
+    assert isinstance(out["retrieved_chunks"], list)
+
+
+def test_retrieve_knowledge_node_empty_query():
+    """空查询时降级为 [] 而非抛异常."""
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    out = retrieve_knowledge({"user_question": "", "context_summary": ""})
+    assert out["retrieved_chunks"] == []
+
+
+def test_full_flow_runs_new_pipeline():
+    """全流程: 新链路 parse → analyze → memory → context → main_agent → critic → revise → final."""
+    import json
+    from langchain_core.messages import AIMessage, HumanMessage
+    from agents.agent import build_agent
+
+    class DeepModel:
+        def __init__(self):
+            self.i = 0
+
+        def invoke(self, messages):
+            self.i += 1
+            content = messages[0].content
+            if "算法分析" in content or "源代码" in content:
+                return AIMessage(content='{"complexity": {"time": "O(1)"}}')
+            if "教学主 Agent" in content:
+                return AIMessage(content="根据第 2 步，x 变成了 2")
+            if "回答评审" in content:
+                return AIMessage(content='{"pass": true, "issues": []}')
+            return AIMessage(content="修订回答")
+
+    payload = {
+        "source_code": "public class A {}",
+        "steps": [{"step": 0, "variables": {"x": 1}}, {"step": 1, "variables": {"x": 2}}],
+        "current_step_index": 1,
+        "user_question": "x 怎么变了？",
+        "compile_error": "",
+    }
+    compiled = build_agent().builder.compile()
+    result = compiled.invoke({"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]}, config={"configurable": {"chat_model": DeepModel()}})
+    assert result.get("analysis_result", {}).get("complexity", {}).get("time") == "O(1)"
+    assert result.get("answer")
 
 
 class DeepFakeModel:
@@ -124,8 +157,6 @@ class DeepFakeModel:
     def invoke(self, messages):
         self.calls.append(messages[0].content[:20])
         content = messages[0].content
-        if "意图分类器" in content:
-            return AIMessage(content='{"intent":"data_query","confidence":0.9,"reason":"追问变量"}')
         if "回答评审" in content:
             return AIMessage(content='{"pass": true, "issues": []}')
         if "回答修订者" in content:
@@ -157,6 +188,18 @@ class TestDeepFlow:
         assert result.get("decision_trace", {}).get("intent") == "data_query"
         assert result.get("decision_trace", {}).get("critic_passed") is True
 
+        # P1-1: 决策痕迹必须包含 tool_calls 与 token_usage（评测 M1.1 依赖）
+        trace = result.get("decision_trace", {})
+        assert "tool_calls" in trace, "决策痕迹应包含 tool_calls"
+        assert isinstance(trace["tool_calls"], list)
+        assert "token_usage" in trace, "决策痕迹应包含 token_usage"
+        tu = trace["token_usage"]
+        assert "prompt_tokens" in tu and "completion_tokens" in tu
+        assert tu.get("estimated") is True
+        # 决策痕迹 JSON 同样出现在最终回答文本中
+        trace_json = json.dumps(trace, ensure_ascii=False)
+        assert trace_json in result["answer"] or "tool_calls" in result["answer"]
+
     def test_deep_flow_critic_fails_triggers_revise(self):
         """评审不通过时触发修订。"""
         payload = {
@@ -175,8 +218,6 @@ class TestDeepFlow:
                     return AIMessage(content='{"pass": false, "issues": ["变量值与数据不符"]}')
                 if "回答修订者" in content:
                     return AIMessage(content="修订后的正确回答")
-                if "意图分类器" in content:
-                    return AIMessage(content='{"intent":"data_query","confidence":0.9,"reason":"追问"}')
                 return AIMessage(content="原始回答有误")
 
         compiled = build_agent().builder.compile()

@@ -37,10 +37,17 @@ def chat_remote(
     headers = {"Authorization": f"Bearer {token}"}
     start = time.time()
     full: list[str] = []
+    event = None
     with httpx.stream("POST", api_url, json=payload, headers=headers, timeout=timeout) as resp:
         resp.raise_for_status()
         for line in resp.iter_lines():
-            if not line or not line.startswith("data:"):
+            line = (line or "").strip()
+            if not line:
+                continue
+            if line.startswith("event: "):
+                event = line[7:].strip()
+                continue
+            if not line.startswith("data:"):
                 continue
             data_str = line[5:].strip()
             if data_str == "[DONE]":
@@ -49,8 +56,12 @@ def chat_remote(
                 chunk = json.loads(data_str)
             except json.JSONDecodeError:
                 continue
-            if chunk.get("event") == "message" and chunk.get("message", {}).get("type") == "answer":
-                full.append(chunk["message"].get("content", ""))
+            if event == "message" and chunk.get("type") == "answer":
+                content = chunk.get("content")
+                if isinstance(content, dict):
+                    full.append(content.get("answer", ""))
+                elif isinstance(content, str):
+                    full.append(content)
     latency = round(time.time() - start, 3)
     answer = "".join(full)
     return {"id": sample.get("id"), "answer": answer, "latency": latency, "decision_trace": parse_decision_trace(answer)}

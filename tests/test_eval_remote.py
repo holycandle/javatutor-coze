@@ -14,10 +14,18 @@ def test_parse_decision_trace_extracts_new_fields():
 
 def test_chat_remote_concatenates_sse_chunks():
     chunks = [
-        'data: {"event":"message","message":{"type":"answer","content":"第"}}\n',
-        'data: {"event":"message","message":{"type":"answer","content":"2 步 arr[1]=5"}}\n',
-        'data: {"event":"message","message":{"type":"follow_up","content":"无关"}}\n',
-        'data: {"event":"follow_up","message":{"type":"answer","content":"x"}}\n',
+        "event: message\n",
+        'data: {"type":"message_start","session_id":"q01"}\n',
+        "",
+        "event: message\n",
+        'data: {"type":"answer","content":{"answer":"第"}}\n',
+        "",
+        "event: message\n",
+        'data: {"type":"answer","content":{"answer":"2 步 arr[1]=5"}}\n',
+        "",
+        "event: message\n",
+        'data: {"type":"message_end","session_id":"q01"}\n',
+        "",
         'data: [DONE]\n',
     ]
     mock_stream = MagicMock()
