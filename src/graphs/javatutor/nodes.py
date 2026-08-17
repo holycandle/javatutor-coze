@@ -6,6 +6,7 @@
 import json
 import logging
 import re
+import time
 from typing import Literal, Any
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -143,6 +144,7 @@ def _parse_json_dict(data: dict) -> dict:
         ),
         "algorithm_tags": algorithm_tags,
         "fallback_reason": "",
+        "request_started_at": time.time(),
     }
 
 
@@ -409,6 +411,7 @@ def build_final(state: JavaTutorState) -> dict:
 
     trace = {
         "intent": state.get("intent", "other"),
+        "latency_ms": round((time.time() - float(state.get("request_started_at", time.time()))) * 1000, 1),
         "confidence": round(float(state.get("intent_confidence", 0.0)), 2),
         "sources": [
             {"source": c["source"], "score": c.get("score", 0.0)}

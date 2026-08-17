@@ -50,6 +50,7 @@
 ```json
 {
   "intent": "data_query|concept|debug|other|animate_guide",
+  "latency_ms": 14203.5,
   "confidence": 0.0,
   "sources": [
     {"source": "知识库: Arrays.sort", "score": 0.82}
@@ -73,6 +74,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `intent` | string | 最终采用的意图 |
+| `latency_ms` | number | 从 `request_started_at`（`parse_context` 记录）到 `build_final` 输出的墙钟耗时，毫秒，保留 1 位小数；用于评测响应速度指标 |
 | `confidence` | number | LLM 分类置信度，0-1 |
 | `sources` | array | 检索命中的知识来源，未命中为空数组 |
 | `critic_passed` | boolean | 评审是否通过；评审跳过时为 `true` 且 `critic_skipped=true` |
@@ -120,7 +122,7 @@ HashMap 是基于哈希表的键值映射，平均查询复杂度为 O(1)。
 参考知识库：HashMap
 
 【决策痕迹】
-{"intent":"concept","confidence":0.95,"sources":[{"source":"知识库: HashMap","score":0.86}],"critic_passed":true,"revised":false,"fallback_reason":"","rag_degraded":false,"critic_skipped":false,"revise_skipped":false,"compaction_mode":"none"}
+{"intent":"concept","latency_ms":14203.5,"confidence":0.95,"sources":[{"source":"知识库: HashMap","score":0.86}],"critic_passed":true,"revised":false,"fallback_reason":"","rag_degraded":false,"critic_skipped":false,"revise_skipped":false,"compaction_mode":"none"}
 ```
 
 ### 6.2 评审拦截并修订
@@ -130,7 +132,7 @@ HashMap 是基于哈希表的键值映射，平均查询复杂度为 O(1)。
 参考知识库：无
 
 【决策痕迹】
-{"intent":"data_query","confidence":0.88,"sources":[],"critic_passed":false,"revised":true,"fallback_reason":"","rag_degraded":false,"critic_skipped":false,"revise_skipped":false,"compaction_mode":"windowed"}
+{"intent":"data_query","latency_ms":13607.2,"confidence":0.88,"sources":[],"critic_passed":false,"revised":true,"fallback_reason":"","rag_degraded":false,"critic_skipped":false,"revise_skipped":false,"compaction_mode":"windowed"}
 ```
 
 ## 7. 前后端约定

@@ -46,3 +46,5 @@ def test_build_final_applies_sanitizer_and_trace():
     assert "```java\nint n = arr.length;" in content
     assert "【决策痕迹】" in content
     assert "step_facts" in content
+    assert isinstance(out["decision_trace"]["latency_ms"], (int, float))
+    assert out["decision_trace"]["latency_ms"] >= 0
