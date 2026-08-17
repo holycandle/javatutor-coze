@@ -74,7 +74,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `intent` | string | 最终采用的意图 |
-| `latency_ms` | number | 从 `request_started_at`（`parse_context` 记录）到 `build_final` 输出的墙钟耗时，毫秒，保留 1 位小数；用于评测响应速度指标 |
+| `latency_ms` | number | 从 `request_started_at`（`parse_context` 写入状态的时间戳）到 `build_final` 输出的图内墙钟耗时，毫秒，保留 1 位小数；用于评测响应速度指标。估算值，与平台 `message_end.time_cost_ms` 不一定一致（后者含网络与平台调度开销） |
 | `confidence` | number | LLM 分类置信度，0-1 |
 | `sources` | array | 检索命中的知识来源，未命中为空数组 |
 | `critic_passed` | boolean | 评审是否通过；评审跳过时为 `true` 且 `critic_skipped=true` |

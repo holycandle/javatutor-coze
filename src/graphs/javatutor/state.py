@@ -122,5 +122,8 @@ class JavaTutorState(TypedDict, total=False):
     token_usage: dict
     """本次回答的 token 消耗：prompt_tokens / completion_tokens / estimated."""
 
+    request_started_at: float
+    """本次请求进入图的时间戳（time.time()，由 parse_context 写入），用于计算 latency_ms."""
+
     step_memories: list
     """step_facts 成功查询后写入工作记忆的单步证据记录（importance 0.8，最多保留 5 条）."""

@@ -1,5 +1,7 @@
 """build_final 代码引用清理与决策痕迹测试。"""
 
+import time
+
 from graphs.javatutor.nodes import _normalize_md, _sanitize_code_quotes, build_final
 
 
@@ -48,3 +50,19 @@ def test_build_final_applies_sanitizer_and_trace():
     assert "step_facts" in content
     assert isinstance(out["decision_trace"]["latency_ms"], (int, float))
     assert out["decision_trace"]["latency_ms"] >= 0
+
+
+def test_latency_ms_uses_request_started_at():
+    """request_started_at 已声明进 schema 并被持久化后，latency_ms 应为正数而非恒为 0。"""
+    state = {
+        "request_started_at": time.time() - 1.5,
+        "intent": "data_query",
+        "intent_confidence": 0.9,
+        "revised": False,
+        "critic_passed": True,
+        "retrieved_chunks": [],
+    }
+    out = build_final(state)
+    latency = out["decision_trace"]["latency_ms"]
+    assert isinstance(latency, (int, float))
+    assert latency > 0, f"latency_ms 应为正数，实际 {latency}"
