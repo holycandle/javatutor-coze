@@ -6,3 +6,4 @@
 - pollution：是否引入无关上下文
 - correctness：教学表达是否准确、适合新手
 最终 score 取四维平均。只返回 JSON。
+禁止使用 markdown 代码块，禁止在 JSON 前后添加任何解释文字。

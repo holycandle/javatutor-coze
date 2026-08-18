@@ -8,13 +8,29 @@ def test_summarize_computes_metrics():
     judged = [
         {"id": "q01", "score": 5, "judgement": "correct", "scores": {"grounding": 5}},
         {"id": "q02", "score": 3, "judgement": "partially_correct", "scores": {"grounding": 3}},
-        {"id": "q03", "judge_parse_error": True},
+        {"id": "q03", "judge_fallback": True, "score": 0, "judgement": "incorrect"},
     ]
     summary = summarize(judged, component={"pass_rate": 0.9})
     assert summary["e2e"]["total"] == 2
     assert summary["e2e"]["avg_score"] == 4.0
     assert summary["e2e"]["grounding_avg"] == 4.0
     assert summary["component"]["pass_rate"] == 0.9
+
+
+def test_summarize_computes_fallback_rates():
+    judged = [
+        {"id": "q01", "score": 5, "judgement": "correct", "scores": {"grounding": 5}},
+        {"id": "q02", "judge_fallback": True, "score": 0, "judgement": "incorrect", "empty_output": True},
+        {"id": "q03", "judge_fallback": True, "score": 0, "judgement": "incorrect"},
+        {"id": "q04", "score": 4, "judgement": "correct", "scores": {"grounding": 4}},
+    ]
+    summary = summarize(judged)
+    # 2 条兜底 / 4 条总数；其中 1 条空输出
+    assert summary["e2e"]["judge_fallback_rate"] == 0.5
+    assert summary["e2e"]["empty_output_rate"] == 0.25
+    # 兜底样本不计入 avg_score（只算 q01/q04）
+    assert summary["e2e"]["total"] == 2
+    assert summary["e2e"]["avg_score"] == 4.5
 
 
 def test_diff_between_rounds():

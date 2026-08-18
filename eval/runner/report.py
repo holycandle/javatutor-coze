@@ -14,7 +14,9 @@ def load_jsonl(path) -> list[dict]:
 
 
 def summarize(judged: list[dict], component: dict | None = None, extended: dict | None = None) -> dict:
-    parsed = [j for j in judged if not j.get("judge_parse_error")]
+    # 兜底样本（judge_fallback）有 score=0/incorrect，但 avg_score/grounding 只统计有效评分样本；
+    # judge_fallback_rate / empty_output_rate 用全部样本作分母，显式化解析退化比例。
+    parsed = [j for j in judged if not j.get("judge_fallback")]
     total = len(parsed)
     avg_score = round(sum(j.get("score", 0) for j in parsed) / total, 4) if total else 0.0
     grounding = [j.get("scores", {}).get("grounding", 0) for j in parsed]
@@ -26,6 +28,8 @@ def summarize(judged: list[dict], component: dict | None = None, extended: dict 
         "correct": sum(1 for j in parsed if j.get("judgement") == "correct"),
         "partially_correct": sum(1 for j in parsed if j.get("judgement") == "partially_correct"),
         "incorrect": sum(1 for j in parsed if j.get("judgement") == "incorrect"),
+        "judge_fallback_rate": _safe(sum(1 for j in judged if j.get("judge_fallback")), len(judged)),
+        "empty_output_rate": _safe(sum(1 for j in judged if j.get("empty_output")), len(judged)),
     }
     if extended:
         e2e.update(extended)
@@ -92,7 +96,7 @@ def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: l
             tokens.append(int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0)))
     task_total = task_ok = 0
     for j in judged:
-        if j.get("judge_parse_error"):
+        if j.get("judge_fallback"):
             continue
         sample = by_id.get(j.get("id"), {})
         out = next((o for o in outputs if o.get("id") == j.get("id")), {})
