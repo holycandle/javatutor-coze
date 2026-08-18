@@ -156,13 +156,17 @@ def cmd_winrate(args) -> int:
 
 
 def cmd_review(args) -> int:
-    from tools.human_review import run_review
+    # 注意：不能用 `tools.human_review`——src/tools（常规包，含 __init__.py）
+    # 会遮蔽根目录 tools/（命名空间包），导致 ModuleNotFoundError。
+    # 用脚本所在目录的直接导入即可（运行 python tools/eval_cli.py 时 sys.path[0] 即 tools/）。
+    from human_review import run_review
 
     return run_review(args.round_dir, Path(args.samples))
 
 
 def cmd_export(args) -> int:
-    from tools.export_training_data import export
+    # 同上：避开 src/tools 遮蔽，用脚本所在目录直接导入。
+    from export_training_data import export
 
     export(args.round_dir, Path(args.out_dir), Path(args.samples))
     return 0
