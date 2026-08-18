@@ -201,7 +201,7 @@ def judge_answer(sample: dict, answer: str, model=None) -> dict[str, Any]:
 
     - 真实调用（model=None）每次重试间退避 RETRY_BACKOFF_SECONDS，缓解端点间歇性空返回。
     - 返回 dict 始终包含 raw_judge_output（最终一次尝试的模型原始输出，便于排查）。
-    - 仍失败标记 judge_parse_error；若最终输出为空串额外标记 empty_output 便于统计。
+    - 仍失败标记 judge_fallback；若最终输出为空串额外标记 empty_output 便于统计。
     """
     last_raw, last_parsed, last_error = None, None, None
     for attempt in range(MAX_ATTEMPTS):

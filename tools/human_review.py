@@ -26,7 +26,7 @@ def _format_judge(j: dict) -> str:
     """把 judged 记录格式化成可读的评分摘要，不 dump 整条 JSON。"""
     if not j:
         return "（无 Judge 结果）"
-    if j.get("judge_parse_error"):
+    if j.get("judge_fallback"):
         if j.get("empty_output"):
             return f"⚠ 未能评分（DeepSeek 空返回，attempts={j.get('attempts')}）"
         if j.get("error"):
