@@ -13,6 +13,8 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from graphs.javatutor.prompting.ontology import build_judge_grounding_block
+
 JUDGE_PROMPT = Path(__file__).resolve().parents[1] / "judge_prompt.md"
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 1.0
@@ -27,7 +29,7 @@ def load_judge_prompt() -> str:
 def build_judge_messages(sample: dict, answer: str) -> list:
     facts = "\n".join(sample.get("expected_facts", []))
     return [
-        SystemMessage(content=load_judge_prompt()),
+        SystemMessage(content=load_judge_prompt() + "\n\n" + build_judge_grounding_block()),
         HumanMessage(content=f"考题：\n{sample.get('payload', {})}\n\n期望事实：\n{facts}\n\nAgent 回答：\n{answer}"),
     ]
 

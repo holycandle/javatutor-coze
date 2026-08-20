@@ -15,6 +15,15 @@ def test_build_judge_messages():
     assert "step=2" in messages[1].content
 
 
+def test_build_judge_messages_includes_ontology():
+    """Judge 的 system 消息应含本体字段 schema 与模块白名单."""
+    messages = build_judge_messages({"payload": {}, "expected_facts": []}, "回答")
+    system = messages[0].content
+    assert "stackFrames" in system
+    assert "堆面板" in system
+    assert "JavaTutor 领域本体" in system
+
+
 # ── parse_judge_output 容错解析 ───────────────────────────────────────────────
 
 

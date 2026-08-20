@@ -119,6 +119,7 @@ SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block
+from graphs.javatutor.prompting.ontology import build_ontology_block
 from graphs.javatutor.prompting.versions import PROMPT_VERSION
 
 _ROLES = {
@@ -133,5 +134,6 @@ def build_system_prompt(intent: str) -> str:
     role = _ROLES.get(intent, SYSTEM_PROMPT_OTHER)
     return (
         f"{role}\n\n## 领域词汇\n{build_glossary_block()}\n\n"
+        f"## 领域本体\n{build_ontology_block()}\n\n"
         f"## 输出契约\n{get_contract(intent)}\n\n## 提示词版本\n{PROMPT_VERSION}"
     )
