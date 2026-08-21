@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from eval.runner.report import diff, summarize, write_summary
+from eval.runner.report import diff, resolve_commit, resolve_model, summarize, write_report, write_summary
 
 
 def test_summarize_computes_metrics():
@@ -80,3 +80,80 @@ def test_compute_extended_metrics():
     assert m["avg_latency"] == 2.0
     assert m["avg_token_usage"] == 150
     assert m["token_usage_sample_count"] == 1
+
+
+# ── write_report（report.md 人读报告） ─────────────────────────────────────────
+
+
+def _make_round(tmp_path):
+    round_dir = tmp_path / "2026-08-17" / "round-1"
+    round_dir.mkdir(parents=True, exist_ok=True)
+    return round_dir
+
+
+def test_write_report_writes_md_with_sections(tmp_path):
+    round_dir = _make_round(tmp_path)
+    summary = {
+        "e2e": {
+            "avg_score": 4.0,
+            "grounding_avg": 4.0,
+            "total": 2,
+            "correct": 1,
+            "partially_correct": 1,
+            "incorrect": 0,
+            "judge_fallback_rate": 0.0,
+            "empty_output_rate": 0.0,
+        },
+        "component": {},
+        "diff_vs_previous": {"avg_score": 0.1, "grounding_avg": 0.2, "component_pass_rate": 0.0},
+    }
+    judged = [
+        {"id": "q01", "score": 5, "judgement": "correct", "scores": {"grounding": 5}, "answer": "回答A"},
+        {"id": "q02", "score": 3, "judgement": "partially_correct", "scores": {"grounding": 3}, "answer": "回答B"},
+    ]
+    path = write_report(round_dir, summary, judged, [], [])
+    assert path == str(round_dir / "report.md")
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "端到端指标" in md
+    assert "Badcase" in md
+    assert "avg_score" in md
+
+
+def test_write_report_includes_fallback_badcase(tmp_path):
+    round_dir = _make_round(tmp_path)
+    summary = {"e2e": {"avg_score": 5.0, "total": 1}, "component": {}, "diff_vs_previous": {}}
+    judged = [
+        {"id": "q01", "score": 5, "judgement": "correct", "scores": {"grounding": 5}, "answer": "正常"},
+        {
+            "id": "q02",
+            "score": 0,
+            "judgement": "incorrect",
+            "scores": {"grounding": 0},
+            "answer": "兜底回答",
+            "reason": "judge output unparseable",
+            "judge_fallback": True,
+            "empty_output": True,
+        },
+    ]
+    write_report(round_dir, summary, judged, [], [])
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "q02" in md
+    assert "judge_fallback" in md
+    assert "兜底回答" in md
+
+
+def test_write_report_empty_judged_no_crash(tmp_path):
+    round_dir = _make_round(tmp_path)
+    summary = {"e2e": {"total": 0}, "component": {}, "diff_vs_previous": {}}
+    path = write_report(round_dir, summary, [], [], [])
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "（无 badcase）" in md
+
+
+def test_resolve_model_and_commit(tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agent_llm_config.json").write_text('{"config": {"model": "m1"}}', encoding="utf-8")
+    assert resolve_model(tmp_path) == "m1"
+    assert resolve_model(tmp_path / "missing") == "unknown"
+    # 非 git 目录回退 unknown
+    assert resolve_commit(tmp_path) == "unknown"

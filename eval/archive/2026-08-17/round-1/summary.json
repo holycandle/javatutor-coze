@@ -16,8 +16,8 @@
   },
   "component": {},
   "diff_vs_previous": {
-    "avg_score": 0.1206,
-    "grounding_avg": 0.3103,
+    "avg_score": 0.0,
+    "grounding_avg": 0.0,
     "component_pass_rate": 0
   }
 }

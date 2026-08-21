@@ -103,7 +103,16 @@ def cmd_judge(args) -> int:
 
 
 def cmd_report(args) -> int:
-    from eval.runner.report import compute_extended_metrics, diff, load_jsonl, summarize, write_summary
+    from eval.runner.report import (
+        compute_extended_metrics,
+        diff,
+        load_jsonl,
+        resolve_commit,
+        resolve_model,
+        summarize,
+        write_report,
+        write_summary,
+    )
 
     samples = load_jsonl(GOLDEN_SET)
     outputs = load_jsonl(args.round_dir / "answers.jsonl")
@@ -116,7 +125,17 @@ def cmd_report(args) -> int:
         previous = json.loads(prev_path.read_text(encoding="utf-8"))
         summary["diff_vs_previous"] = diff(previous, summary)
     write_summary(args.round_dir / "summary.json", summary)
+    report_path = write_report(
+        args.round_dir,
+        summary,
+        judged,
+        outputs,
+        samples,
+        model=resolve_model(),
+        commit=resolve_commit(),
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(f"report -> {report_path}")
     return 0
 
 
