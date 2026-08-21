@@ -27,15 +27,26 @@
 | 深化设计 | `docs/spec/2026-08-10-coze-agent-deepening-design.md` | 既有深化链路设计 |
 | 评估系统设计 | `docs/spec/2026-08-14-agent-eval-system-design.md` | 双轨评估系统设计 |
 | 评估系统计划 | `docs/plan/2026-08-14-agent-eval-system-plan.md` | 评估系统 TDD 实施计划 |
+| Judge 修复计划 | `docs/plan/2026-08-17-judge-parser-fix-and-round2-plan.md` | Judge 解析修复与 Round-2 评估计划 |
+| Judge 结构化输出计划 | `docs/plan/2026-08-18-judge-structured-output-and-fallback-rate-plan.md` | JSON Schema 约束 + 兜底率指标 + 人工复核接入导出 |
+| 评估报告 MD 计划 | `docs/plan/2026-08-21-eval-report-md-plan.md` | 每轮生成人读 Markdown 报告 |
+| 领域本体计划 | `docs/plan/2026-08-19-javatutor-domain-ontology-plan.md` | JavaTutor 结构化领域本体（模块/字段映射/契约规则） |
+| 领域本体 review | `docs/reviews/2026-08-20-javatutor-domain-ontology-review.md` | 领域本体执行审查（1 P2 / 2 P3 已修复） |
+| 评估报告 MD review | `docs/reviews/2026-08-21-eval-report-md-review.md` | Markdown 报告生成审查（2 P3） |
 | 架构改进设计 | `docs/spec/2026-08-14-agent-architecture-improvement-design.md` | 多工具 + 上下文工程 + 工作记忆设计 |
 | 架构改进计划 | `docs/plan/2026-08-14-agent-architecture-improvement-plan.md` | 架构改进 TDD 实施计划 |
 | RAG 指南 | `docs/rag-knowledge-guide.md` | 语料格式与灌库说明 |
+| 评估指南 | `docs/dev-eval-guide.md` | 开发者如何跑评估、解读结果与导出微调数据 |
 | 实现记录 | `docs/devlog/YYYY-MM-DD-<topic>.md` | 每次实现变更的流水记录 |
 | 评估系统实现 | `docs/devlog/2026-08-14-agent-eval-system.md` | 双轨评估系统实现记录 |
 | 评估系统 review | `docs/reviews/2026-08-14-eval-system-review.md` | 评估系统首轮审查 |
 | 评估系统 M1.1 review | `docs/reviews/2026-08-14-eval-system-m11-review.md` | remote mode 与扩展指标审查 |
 | 架构改进实现 | `docs/devlog/2026-08-15-agent-architecture-improvement.md` | 多工具架构重构实现记录 |
 | 架构改进 review | `docs/reviews/2026-08-15-agent-architecture-improve-review.md` | 架构改进首轮审查（2 P1 / 2 P2 / 2 P3 已修复） |
+| Judge 修复 review | `docs/reviews/2026-08-17-judge-parser-fix-review.md` | Judge 解析加固 + Round-1 重判（发现空返回主因） |
+| Judge 结构化输出实现 | `docs/devlog/2026-08-18-judge-structured-output.md` | JSON Schema 回退 + 兜底率指标 + 人工复核接入导出（121 passed） |
+| 领域本体实现 | `docs/devlog/2026-08-19-javatutor-domain-ontology.md` | 结构化本体 + 常驻层/Judge 注入（129 passed） |
+| 评估报告 MD 实现 | `docs/devlog/2026-08-21-eval-report-md.md` | report.md 人读报告生成（133 passed） |
 
 ## 文档规范
 

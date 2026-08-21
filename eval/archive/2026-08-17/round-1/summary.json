@@ -1,0 +1,23 @@
+{
+  "e2e": {
+    "avg_score": 3.5172,
+    "grounding_avg": 3.1034,
+    "total": 29,
+    "correct": 14,
+    "partially_correct": 8,
+    "incorrect": 7,
+    "judge_fallback_rate": 0.0645,
+    "empty_output_rate": 0.0645,
+    "tool_call_accuracy": 0.4839,
+    "task_success_rate": 0.2759,
+    "avg_latency": 16.614,
+    "avg_token_usage": 1549.8,
+    "token_usage_sample_count": 29
+  },
+  "component": {},
+  "diff_vs_previous": {
+    "avg_score": 0.0,
+    "grounding_avg": 0.0,
+    "component_pass_rate": 0
+  }
+}

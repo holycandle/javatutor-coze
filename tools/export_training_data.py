@@ -39,12 +39,15 @@ def export(round_dir: Path, out_dir: Path, samples_path: Path) -> dict:
     answers = {a["id"]: a for a in load_jsonl(round_dir / "answers.jsonl")}
     judged = load_jsonl(round_dir / "judged.jsonl")
     samples = {s["id"]: s for s in load_jsonl(samples_path)}
+    # 人工复核结果：verdict == "reject" 的样本不进入 SFT/DPO 导出
+    reviews = load_jsonl(round_dir / "human_review.jsonl")
+    rejected = {r["id"] for r in reviews if r.get("verdict") == "reject"}
     sft = []
     pairs: dict[str, dict] = {}
     for row in judged:
         sample = samples.get(row.get("id"))
         answer = answers.get(row.get("id"))
-        if not sample or not answer:
+        if not sample or not answer or row.get("id") in rejected:
             continue
         question = (sample.get("payload") or {}).get("user_question", "")
         instruction = {
@@ -71,12 +74,13 @@ def export(round_dir: Path, out_dir: Path, samples_path: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sft.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in sft), encoding="utf-8")
     (out_dir / "dpo.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in dpo), encoding="utf-8")
+    rejected_note = f"；已按 human_review 过滤 reject {len(rejected)} 条" if rejected else ""
     (out_dir / "README.md").write_text(
         "SFT/DPO 数据来自评测存档。SFT 为高分正确回答；DPO 为同题偏好对。\n"
-        "训练前建议人工复核 human_review.jsonl，再过滤低质量样本。\n",
+        f"本次导出{rejected_note}。\n",
         encoding="utf-8",
     )
-    result = {"sft": len(sft), "dpo": len(dpo), "out_dir": str(out_dir)}
+    result = {"sft": len(sft), "dpo": len(dpo), "rejected": len(rejected), "out_dir": str(out_dir)}
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 

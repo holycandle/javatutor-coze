@@ -103,7 +103,16 @@ def cmd_judge(args) -> int:
 
 
 def cmd_report(args) -> int:
-    from eval.runner.report import compute_extended_metrics, diff, load_jsonl, summarize, write_summary
+    from eval.runner.report import (
+        compute_extended_metrics,
+        diff,
+        load_jsonl,
+        resolve_commit,
+        resolve_model,
+        summarize,
+        write_report,
+        write_summary,
+    )
 
     samples = load_jsonl(GOLDEN_SET)
     outputs = load_jsonl(args.round_dir / "answers.jsonl")
@@ -116,7 +125,17 @@ def cmd_report(args) -> int:
         previous = json.loads(prev_path.read_text(encoding="utf-8"))
         summary["diff_vs_previous"] = diff(previous, summary)
     write_summary(args.round_dir / "summary.json", summary)
+    report_path = write_report(
+        args.round_dir,
+        summary,
+        judged,
+        outputs,
+        samples,
+        model=resolve_model(),
+        commit=resolve_commit(),
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(f"report -> {report_path}")
     return 0
 
 
@@ -156,13 +175,17 @@ def cmd_winrate(args) -> int:
 
 
 def cmd_review(args) -> int:
-    from tools.human_review import run_review
+    # 注意：不能用 `tools.human_review`——src/tools（常规包，含 __init__.py）
+    # 会遮蔽根目录 tools/（命名空间包），导致 ModuleNotFoundError。
+    # 用脚本所在目录的直接导入即可（运行 python tools/eval_cli.py 时 sys.path[0] 即 tools/）。
+    from human_review import run_review
 
     return run_review(args.round_dir, Path(args.samples))
 
 
 def cmd_export(args) -> int:
-    from tools.export_training_data import export
+    # 同上：避开 src/tools 遮蔽，用脚本所在目录直接导入。
+    from export_training_data import export
 
     export(args.round_dir, Path(args.out_dir), Path(args.samples))
     return 0

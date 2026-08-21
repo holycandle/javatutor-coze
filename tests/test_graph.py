@@ -224,3 +224,21 @@ class TestDeepFlow:
         result = compiled.invoke(initial, config={"configurable": {"chat_model": CriticFailModel()}})
         assert result.get("decision_trace", {}).get("revised") is True
         assert "修订后的正确回答" in result.get("answer", "")
+
+
+def test_build_context_includes_ontology():
+    """本体块进入常驻 system prompt，context_built 应含模块名与契约规则."""
+    from graphs.javatutor.nodes import build_context_node
+
+    out = build_context_node(
+        {
+            "user_question": "arr 怎么变了？",
+            "source_code": "public class A {}",
+            "messages": [],
+            "memories": [],
+        }
+    )
+    text = out["context_built"]
+    assert "变量卡片" in text
+    assert "堆面板" in text
+    assert "禁止编造引擎内部机制" in text

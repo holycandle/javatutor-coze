@@ -1,0 +1,106 @@
+{
+  "modules": [
+    {
+      "id": "editor",
+      "name": "编辑区",
+      "function": "学生编写与编辑 Java 源码的区域，源码由用户提交后交给后端 TraceEngine 执行",
+      "data_field": "source_code",
+      "ui_behavior": "提供代码高亮与行号，与单步播放的高亮行联动",
+      "common_confusions": []
+    },
+    {
+      "id": "variable_panel",
+      "name": "变量卡片",
+      "function": "展示当前执行步骤下所有局部变量与参数的当前值快照",
+      "data_field": "steps[i].variables",
+      "ui_behavior": "变量值在相邻步骤间发生变化时高亮",
+      "common_confusions": [
+        "变量值为什么在相邻步骤间跳变",
+        "数组与对象变量如何展示其内容"
+      ]
+    },
+    {
+      "id": "heap_panel",
+      "name": "堆面板",
+      "function": "展示学生代码 new 出来的复杂对象（堆对象）及其字段",
+      "data_field": "steps[i].heap",
+      "ui_behavior": "对象创建或字段更新时刷新",
+      "common_confusions": [
+        "堆对象与栈变量的区别",
+        "对象 id 的含义"
+      ]
+    },
+    {
+      "id": "stack_panel",
+      "name": "调用栈",
+      "function": "展示方法调用栈，每层栈帧含方法名、参数与局部变量",
+      "data_field": "steps[i].stackFrames",
+      "ui_behavior": "方法调用或返回时增删栈帧",
+      "common_confusions": [
+        "栈帧与局部变量的关系",
+        "递归调用时栈帧如何变化"
+      ]
+    },
+    {
+      "id": "control_flow_panel",
+      "name": "控制流图",
+      "function": "展示方法级控制流程图，由源码静态分析得到",
+      "data_field": null,
+      "ui_behavior": "高亮当前执行到的分支",
+      "common_confusions": []
+    },
+    {
+      "id": "console_panel",
+      "name": "控制台",
+      "function": "展示程序运行期间 System.out 捕获的输出",
+      "data_field": "steps[i].output",
+      "ui_behavior": "按执行顺序追加显示输出",
+      "common_confusions": [
+        "控制台输出与变量值的区别"
+      ]
+    },
+    {
+      "id": "algo_viz_panel",
+      "name": "算法可视化",
+      "function": "提供算法/数据结构动画演示，由前端生成，Agent 不生成 SVG 或动画",
+      "data_field": null,
+      "ui_behavior": "用户点击按钮触发动画",
+      "common_confusions": [
+        "动画由前端生成，Agent 只负责引导使用而不生成"
+      ]
+    },
+    {
+      "id": "ai_panel",
+      "name": "AI 讲解面板",
+      "function": "展示 Agent 基于真实执行数据生成的讲解文本",
+      "data_field": null,
+      "ui_behavior": "流式渲染 Agent 回答",
+      "common_confusions": []
+    },
+    {
+      "id": "step_playback",
+      "name": "单步播放 / 高亮行",
+      "function": "逐步播放执行步骤，并高亮当前步骤对应的源码行",
+      "data_field": "steps[i].line",
+      "ui_behavior": "高亮当前行，并联动变量卡片、堆面板、调用栈、控制台同步刷新",
+      "common_confusions": [
+        "高亮行号与步骤的对应关系"
+      ]
+    }
+  ],
+  "field_schema": {
+    "step": "步骤序号，从 1 起（steps[i].step 的值，TraceEngine 输出）",
+    "current_step_index": "当前步骤索引，0-based（对应 steps 数组下标）；展示给用户时 +1",
+    "step_index": "step_facts 工具的 step_index 参数，0-based；展示给用户时 +1",
+    "line": "该步对应的源码行号 → 前端高亮行",
+    "variables": "该步执行后的变量快照 → 变量卡片面板",
+    "heap": "堆对象快照 → 堆面板",
+    "stackFrames": "调用栈快照 → 调用栈面板",
+    "output": "System.out 输出 → 控制台面板"
+  },
+  "data_contract_rules": [
+    "引用任何步骤号、行号、变量值都必须基于 steps 数据中真实存在的值，不得虚构",
+    "当步骤数据与源码语义冲突时，指出数据异常并给出基于源码的预期值，禁止编造引擎内部机制（如越界读内存、指针运算等）",
+    "intent=analyze 时自动执行复杂度与算法/数据结构标签分析，结果供后续问答复用"
+  ]
+}
