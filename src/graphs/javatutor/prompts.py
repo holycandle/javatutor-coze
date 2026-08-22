@@ -15,6 +15,22 @@ _MARKDOWN_RULES = """
 5. 段落之间用空行分隔。
 6. 引用 `step_facts` 返回的 `line_text` 时必须原样输出，不得在代码行前添加任何多余字符（如单独一行的 `a`）。"""
 
+_EDIT_SUGGESTION_RULES = """
+
+## 编辑建议块（当回答包含对当前代码的具体修改时，必须输出）
+
+在正文之后追加（与正文之间空一行）：
+
+【编辑建议】
+{"edits":[{"title":"简短标题","old_string":"被替换的源码原文","new_string":"替换后的代码","explanation":"一句话说明"}]}
+
+硬性要求：
+1. old_string 必须逐字摘自用户提交的 source_code（含缩进与空白），禁止改写、省略或臆造。
+2. old_string 必须在源码中唯一出现；若目标片段不唯一，扩大片段至唯一为止。
+3. 多个 edit 的 old_string 区间不得重叠；每个 edit 独立可应用。
+4. 仅在确有具体修改建议时输出该块；纯解释类回答不要输出。
+5. 该块单独成行，JSON 独占一行，放在【决策痕迹】之前（决策痕迹由系统自动追加，模型不要自行输出）。"""
+
 SYSTEM_PROMPT_DATA_QUERY = """你是一位专业的 Java 编程教育专家，擅长通过执行步骤讲解变量变化和数据流动。
 
 ## 职责
@@ -115,7 +131,7 @@ SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
 查询结果会自动写入工作记忆并在后续上下文中复用。请用上下文中的当前步骤索引构造参数，不要向用户索要步骤号。
 直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。
 引用代码行时严格使用 `step_facts` 返回的 `line_text` 原文，代码块语言固定为 `java`，禁止在代码行前添加多余字符。
-当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `step_facts` 获取真实证据再回答，禁止仅凭上下文变量快照直接断言变量值。"""
+当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `step_facts` 获取真实证据再回答，禁止仅凭上下文变量快照直接断言变量值。""" + _EDIT_SUGGESTION_RULES
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block
