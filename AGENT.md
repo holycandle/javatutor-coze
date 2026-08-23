@@ -17,6 +17,8 @@
 | 评估系统 plan | 已执行 |
 | 架构改进 spec | 已评审 |
 | 架构改进 plan | 已执行 |
+| 执行上下文拉取 spec | 待执行 |
+| 执行上下文拉取 plan | 待执行 |
 
 ## 规约与文档索引
 
@@ -35,6 +37,8 @@
 | 评估报告 MD review | `docs/reviews/2026-08-21-eval-report-md-review.md` | Markdown 报告生成审查（2 P3） |
 | 架构改进设计 | `docs/spec/2026-08-14-agent-architecture-improvement-design.md` | 多工具 + 上下文工程 + 工作记忆设计 |
 | 架构改进计划 | `docs/plan/2026-08-14-agent-architecture-improvement-plan.md` | 架构改进 TDD 实施计划 |
+| 执行上下文拉取设计 | `docs/spec/2026-08-23-execution-context-fetch-design.md` | 后端快照按 `run_id` 拉取与 Coze 侧 `fetch_execution_context` 设计 |
+| 执行上下文拉取计划 | `docs/plan/2026-08-23-execution-context-fetch-plan.md` | 引用式拉取执行上下文 TDD 实施计划 |
 | RAG 指南 | `docs/rag-knowledge-guide.md` | 语料格式与灌库说明 |
 | 评估指南 | `docs/dev-eval-guide.md` | 开发者如何跑评估、解读结果与导出微调数据 |
 | 协作指南 | `docs/agent-collaboration-guide.md` | 新人上手：处理流程图与各阶段职责 |
