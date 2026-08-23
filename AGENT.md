@@ -35,6 +35,8 @@
 | 领域本体计划 | `docs/plan/2026-08-19-javatutor-domain-ontology-plan.md` | JavaTutor 结构化领域本体（模块/字段映射/契约规则） |
 | 领域本体 review | `docs/reviews/2026-08-20-javatutor-domain-ontology-review.md` | 领域本体执行审查（1 P2 / 2 P3 已修复） |
 | 评估报告 MD review | `docs/reviews/2026-08-21-eval-report-md-review.md` | Markdown 报告生成审查（2 P3） |
+| 执行上下文获取设计 | `docs/spec/2026-08-23-execution-context-fetch-design.md` | 入站只带 run_id，Coze 侧确定性获取执行上下文 |
+| 执行上下文获取计划 | `docs/plan/2026-08-23-execution-context-fetch-plan.md` | fetch_execution_context 工具 + graph 节点 + 降级 |
 | 架构改进设计 | `docs/spec/2026-08-14-agent-architecture-improvement-design.md` | 多工具 + 上下文工程 + 工作记忆设计 |
 | 架构改进计划 | `docs/plan/2026-08-14-agent-architecture-improvement-plan.md` | 架构改进 TDD 实施计划 |
 | 执行上下文拉取设计 | `docs/spec/2026-08-23-execution-context-fetch-design.md` | 后端快照按 `run_id` 拉取与 Coze 侧 `fetch_execution_context` 设计 |
@@ -52,6 +54,7 @@
 | Judge 结构化输出实现 | `docs/devlog/2026-08-18-judge-structured-output.md` | JSON Schema 回退 + 兜底率指标 + 人工复核接入导出（121 passed） |
 | 领域本体实现 | `docs/devlog/2026-08-19-javatutor-domain-ontology.md` | 结构化本体 + 常驻层/Judge 注入（129 passed） |
 | 评估报告 MD 实现 | `docs/devlog/2026-08-21-eval-report-md.md` | report.md 人读报告生成（133 passed） |
+| 执行上下文获取实现 | `docs/devlog/2026-08-23-execution-context-fetch.md` | fetch 工具 + 确定性节点 + 降级（148 passed） |
 
 ## 文档规范
 

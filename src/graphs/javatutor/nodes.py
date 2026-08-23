@@ -114,7 +114,8 @@ def _parse_json_dict(data: dict) -> dict:
     current_step_index = data.get("current_step_index", 0)
     current_line = data.get("current_line", 1)
     user_question = data.get("user_question", "")
-    user_id = data.get("user_id", "")
+    run_id = data.get("run_id", "")
+    session_id = data.get("session_id", data.get("user_id", ""))
     compile_error = data.get("compile_error", "")
     intent = data.get("intent", "")
     algorithm_tags = data.get("algorithm_tags") or []
@@ -134,7 +135,8 @@ def _parse_json_dict(data: dict) -> dict:
         "current_line": current_line,
         "current_variables": current_variables,
         "user_question": user_question,
-        "user_id": user_id,
+        "user_id": session_id,
+        "run_id": run_id,
         "compile_error": compile_error,
         "has_error": bool(compile_error and compile_error.strip()),
         "intent": (
@@ -410,6 +412,10 @@ def build_final(state: JavaTutorState) -> dict:
     answer = _strip_leaked_json(answer)
 
     trace = {
+        "run_id": state.get("run_id", ""),
+        "fetch_context_failed": state.get("fetch_context_failed", False),
+        "fetch_context_latency_ms": state.get("fetch_context_latency_ms", 0.0),
+        "fetch_context_error": state.get("fetch_context_error", ""),
         "intent": state.get("intent", "other"),
         "latency_ms": round((time.time() - float(state.get("request_started_at", time.time()))) * 1000, 1),
         "confidence": round(float(state.get("intent_confidence", 0.0)), 2),

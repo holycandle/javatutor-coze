@@ -146,3 +146,32 @@ def test_parse_context_explicit_intent_wins():
     state = {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]}
     out = parse_context(state)
     assert out["intent"] == "concept"
+
+
+def test_parse_new_envelope_maps_session_id_to_user_id():
+    payload = {
+        "run_id": "3f8a2c0d-1234-5678-9abc-def012345678",
+        "session_id": "session-9",
+        "user_question": "请解释当前这一步在做什么",
+        "intent": "data_query",
+        "compile_error": "",
+    }
+    state = parse_context(json.dumps(payload))
+    assert state["run_id"] == "3f8a2c0d-1234-5678-9abc-def012345678"
+    assert state["user_id"] == "session-9"
+    assert state["source_code"] == ""
+    assert state["steps"] == []
+    assert state["steps_count"] == 0
+    assert state["has_steps"] is False
+    assert state["intent"] == "data_query"
+
+
+def test_parse_new_envelope_without_intent_derives_conservative_intent():
+    payload = {
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "user_question": "为什么 arr 变了？",
+        "compile_error": "",
+    }
+    state = parse_context(json.dumps(payload))
+    assert state["intent"] == "data_query"

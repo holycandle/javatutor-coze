@@ -82,3 +82,17 @@ def test_main_agent_unknown_tool_not_leaked_as_answer():
     assert "最终直接回答" in out["answer"]
     # JSON 工具调用不应出现在最终回答里
     assert "no_such_tool" not in out["answer"]
+
+
+def test_main_agent_returns_fixed_fallback_when_context_unavailable():
+    state = {
+        "context_built": "",
+        "fetch_context_failed": True,
+        "has_steps": False,
+    }
+    model = SequenceModel(["模型不应被调用"])
+    out = main_agent_node(state, model=model)
+    assert "请重新运行代码后再提问" in out["answer"]
+    assert out["tool_rounds"] == 0
+    assert out["tool_calls"] == []
+    assert out["step_memories"] == []

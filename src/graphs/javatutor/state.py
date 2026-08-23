@@ -127,3 +127,19 @@ class JavaTutorState(TypedDict, total=False):
 
     step_memories: list
     """step_facts 成功查询后写入工作记忆的单步证据记录（importance 0.8，最多保留 5 条）."""
+
+    # === 执行上下文获取（新 envelope） ===
+    run_id: str
+    """JavaTutor 后端本次运行生成的 run_id."""
+
+    fetch_context_failed: bool
+    """fetch_execution_context 是否失败."""
+
+    fetch_context_latency_ms: float
+    """fetch_execution_context 请求耗时，单位毫秒."""
+
+    fetch_context_error: str
+    """fetch_execution_context 失败时的可读错误."""
+
+    run_context_memory: dict
+    """本轮运行上下文的紧凑摘要，禁止保存完整 source_code 与 steps."""

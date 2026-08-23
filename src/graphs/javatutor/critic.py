@@ -69,6 +69,9 @@ def _facts(state) -> str:
 
 
 def critic_node(state, model=None) -> dict[str, Any]:
+    # 上下文不可用时的固定降级文案是确定性输出，不进入评审/修订的 LLM 循环。
+    if state.get("fetch_context_failed") and not state.get("has_steps"):
+        return {"critic_passed": True, "critic_feedback": "", "critic_skipped": True}
     answer = state.get("revised_answer") or state.get("answer") or ""
     messages = [
         SystemMessage(content=SYSTEM_PROMPT_CRITIC),

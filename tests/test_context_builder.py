@@ -49,3 +49,21 @@ def test_gather_includes_current_step_position():
     assert "当前执行位置" in combined
     assert "当前步骤索引: 1" in combined
     assert "总步骤数: 2" in combined
+
+
+def test_gather_includes_run_context_memory():
+    state = {
+        **STATE,
+        "run_context_memory": {
+            "run_id": "run-1",
+            "code_hash": "abc123",
+            "steps_count": 2,
+            "current_step_index": 1,
+            "current_line": 4,
+            "algorithm_tags": ["遍历"],
+        },
+    }
+    packets = gather(state, history=[], memories=[])
+    combined = "\n".join(p.content for p in packets)
+    assert "运行上下文摘要" in combined
+    assert "code_hash" in combined
