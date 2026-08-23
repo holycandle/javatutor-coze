@@ -37,6 +37,7 @@
 | 架构改进计划 | `docs/plan/2026-08-14-agent-architecture-improvement-plan.md` | 架构改进 TDD 实施计划 |
 | RAG 指南 | `docs/rag-knowledge-guide.md` | 语料格式与灌库说明 |
 | 评估指南 | `docs/dev-eval-guide.md` | 开发者如何跑评估、解读结果与导出微调数据 |
+| 协作指南 | `docs/agent-collaboration-guide.md` | 新人上手：处理流程图与各阶段职责 |
 | 实现记录 | `docs/devlog/YYYY-MM-DD-<topic>.md` | 每次实现变更的流水记录 |
 | 评估系统实现 | `docs/devlog/2026-08-14-agent-eval-system.md` | 双轨评估系统实现记录 |
 | 评估系统 review | `docs/reviews/2026-08-14-eval-system-review.md` | 评估系统首轮审查 |
