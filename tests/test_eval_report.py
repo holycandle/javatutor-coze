@@ -127,6 +127,26 @@ def test_write_report_writes_md_with_sections(tmp_path):
     assert "avg_score" in md
 
 
+def test_write_report_includes_grounding_verify_metrics(tmp_path):
+    round_dir = _make_round(tmp_path)
+    summary = {
+        "e2e": {
+            "avg_score": 4.0,
+            "total": 2,
+            "grounding_verify_applicable": 2,
+            "grounding_verify_checked": 4,
+            "grounding_verify_violations": 1,
+            "grounding_verify_accuracy": 0.5,
+        },
+        "component": {},
+        "diff_vs_previous": {},
+    }
+    path = write_report(round_dir, summary, [], [], [])
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "grounding_verify_applicable" in md
+    assert "grounding_verify_accuracy" in md
+
+
 def test_write_report_includes_fallback_badcase(tmp_path):
     round_dir = _make_round(tmp_path)
     summary = {"e2e": {"avg_score": 5.0, "total": 1}, "component": {}, "diff_vs_previous": {}}

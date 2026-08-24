@@ -3,7 +3,7 @@
 - 日期：2026-08-17
 - 轮次：round-1
 - 模型：doubao-seed-2-0-lite-260215
-- commit：70bd1a9
+- commit：7f34520
 
 ## 组件级指标
 
@@ -25,6 +25,10 @@
 | avg_token_usage | 1549.8 |
 | judge_fallback_rate | 0.0645 |
 | empty_output_rate | 0.0645 |
+| grounding_verify_applicable | 17 |
+| grounding_verify_checked | 36 |
+| grounding_verify_violations | 3 |
+| grounding_verify_accuracy | 0.8235 |
 
 ## 与上一轮对比
 

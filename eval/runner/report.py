@@ -113,6 +113,10 @@ _E2E_METRIC_ORDER = (
     "avg_token_usage",
     "judge_fallback_rate",
     "empty_output_rate",
+    "grounding_verify_applicable",
+    "grounding_verify_checked",
+    "grounding_verify_violations",
+    "grounding_verify_accuracy",
 )
 
 

@@ -103,6 +103,7 @@ def cmd_judge(args) -> int:
 
 
 def cmd_report(args) -> int:
+    from eval.runner.grounding import compute_grounding_verify
     from eval.runner.report import (
         compute_extended_metrics,
         diff,
@@ -119,6 +120,7 @@ def cmd_report(args) -> int:
     outputs = load_jsonl(args.round_dir / "answers.jsonl")
     judged = load_jsonl(args.round_dir / "judged.jsonl")
     extended = compute_extended_metrics(outputs, samples, judged)
+    extended.update(compute_grounding_verify(outputs, samples))
     summary = summarize(judged, component=None, extended=extended)
     previous = resolve_previous_summary(args.round_dir)
     if previous:
