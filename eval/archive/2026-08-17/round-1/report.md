@@ -2,8 +2,8 @@
 
 - 日期：2026-08-17
 - 轮次：round-1
-- 模型：unknown
-- commit：unknown
+- 模型：doubao-seed-2-0-lite-260215
+- commit：70bd1a9
 
 ## 组件级指标
 
@@ -28,11 +28,7 @@
 
 ## 与上一轮对比
 
-| 指标 | diff |
-|---|---|
-| avg_score | 0.0 |
-| grounding_avg | 0.0 |
-| component_pass_rate | 0 |
+（无上一轮数据）
 
 ## Badcase
 

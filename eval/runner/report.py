@@ -78,6 +78,23 @@ def diff(previous: dict, current: dict) -> dict:
     }
 
 
+def resolve_previous_summary(round_dir: Path) -> dict | None:
+    """解析上一轮 summary.json；首轮（round-n, n<=1）或无上一轮时返回 None。"""
+    try:
+        n = int(round_dir.name.rsplit("-", 1)[-1])
+    except (ValueError, IndexError):
+        n = 1
+    if n <= 1:
+        return None
+    prev_path = round_dir.parent / f"round-{n - 1}" / "summary.json"
+    if not prev_path.exists():
+        return None
+    try:
+        return json.loads(prev_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def write_summary(path, summary) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

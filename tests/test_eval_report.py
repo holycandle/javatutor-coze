@@ -1,7 +1,15 @@
 import json
 from pathlib import Path
 
-from eval.runner.report import diff, resolve_commit, resolve_model, summarize, write_report, write_summary
+from eval.runner.report import (
+    diff,
+    resolve_commit,
+    resolve_model,
+    resolve_previous_summary,
+    summarize,
+    write_report,
+    write_summary,
+)
 
 
 def test_summarize_computes_metrics():
@@ -157,3 +165,24 @@ def test_resolve_model_and_commit(tmp_path):
     assert resolve_model(tmp_path / "missing") == "unknown"
     # 非 git 目录回退 unknown
     assert resolve_commit(tmp_path) == "unknown"
+
+
+def test_resolve_previous_summary_first_round_returns_none(tmp_path):
+    round_dir = tmp_path / "2026-08-17" / "round-1"
+    round_dir.mkdir(parents=True, exist_ok=True)
+    assert resolve_previous_summary(round_dir) is None
+
+
+def test_resolve_previous_summary_second_round_reads_prev(tmp_path):
+    archive = tmp_path / "2026-08-17"
+    prev = archive / "round-1"
+    prev.mkdir(parents=True, exist_ok=True)
+    (prev / "summary.json").write_text('{"e2e": {"avg_score": 4.0}}', encoding="utf-8")
+    result = resolve_previous_summary(archive / "round-2")
+    assert result == {"e2e": {"avg_score": 4.0}}
+
+
+def test_resolve_previous_summary_missing_prev_returns_none(tmp_path):
+    round_dir = tmp_path / "2026-08-17" / "round-3"
+    round_dir.mkdir(parents=True, exist_ok=True)
+    assert resolve_previous_summary(round_dir) is None

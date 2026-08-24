@@ -15,9 +15,5 @@
     "token_usage_sample_count": 29
   },
   "component": {},
-  "diff_vs_previous": {
-    "avg_score": 0.0,
-    "grounding_avg": 0.0,
-    "component_pass_rate": 0
-  }
+  "diff_vs_previous": {}
 }
