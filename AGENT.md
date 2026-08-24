@@ -48,6 +48,7 @@
 | Judge 结构化输出实现 | `docs/devlog/2026-08-18-judge-structured-output.md` | JSON Schema 回退 + 兜底率指标 + 人工复核接入导出（121 passed） |
 | 领域本体实现 | `docs/devlog/2026-08-19-javatutor-domain-ontology.md` | 结构化本体 + 常驻层/Judge 注入（129 passed） |
 | 评估报告 MD 实现 | `docs/devlog/2026-08-21-eval-report-md.md` | report.md 人读报告生成（133 passed） |
+| 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 
 ## 文档规范
 
