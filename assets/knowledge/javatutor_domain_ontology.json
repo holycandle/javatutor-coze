@@ -11,20 +11,21 @@
     {
       "id": "variable_panel",
       "name": "变量卡片",
-      "function": "展示当前执行步骤下所有局部变量与参数的当前值快照",
-      "data_field": "steps[i].variables",
-      "ui_behavior": "变量值在相邻步骤间发生变化时高亮",
+      "function": "展示当前栈帧下局部变量与参数的当前值快照，位于「内存监控」面板的栈区内，非独立面板",
+      "data_field": "steps[i].stackFrames[*].locals（主来源）；steps[i].variables（旧字段/无栈帧时回退）",
+      "ui_behavior": "变量值在相邻步骤间发生变化时荧光高亮",
       "common_confusions": [
         "变量值为什么在相邻步骤间跳变",
-        "数组与对象变量如何展示其内容"
+        "数组与对象变量如何展示其内容",
+        "变量卡片与调用栈同属「内存监控」面板，不是独立面板"
       ]
     },
     {
       "id": "heap_panel",
       "name": "堆面板",
-      "function": "展示学生代码 new 出来的复杂对象（堆对象）及其字段",
+      "function": "「内存监控」面板的堆区，展示学生代码 new 出来的复杂对象（堆对象）及其字段/数组槽/映射键值",
       "data_field": "steps[i].heap",
-      "ui_behavior": "对象创建或字段更新时刷新",
+      "ui_behavior": "对象字段或数组槽值在相邻步骤间变化时荧光高亮",
       "common_confusions": [
         "堆对象与栈变量的区别",
         "对象 id 的含义"
@@ -33,7 +34,7 @@
     {
       "id": "stack_panel",
       "name": "调用栈",
-      "function": "展示方法调用栈，每层栈帧含方法名、参数与局部变量",
+      "function": "「内存监控」面板的栈区，展示方法调用栈，每层栈帧含方法名、参数与局部变量卡片",
       "data_field": "steps[i].stackFrames",
       "ui_behavior": "方法调用或返回时增删栈帧",
       "common_confusions": [
@@ -44,17 +45,19 @@
     {
       "id": "control_flow_panel",
       "name": "控制流图",
-      "function": "展示方法级控制流程图，由源码静态分析得到",
+      "function": "展示方法级控制流程图，由源码静态分析得到；点击 call 节点可下钻到子方法",
       "data_field": null,
-      "ui_behavior": "高亮当前执行到的分支",
-      "common_confusions": []
+      "ui_behavior": "按当前行高亮对应节点；支持下钻查看子方法与返回",
+      "common_confusions": [
+        "控制流图由源码静态分析生成，不依赖运行步骤数据"
+      ]
     },
     {
       "id": "console_panel",
       "name": "控制台",
       "function": "展示程序运行期间 System.out 捕获的输出",
       "data_field": "steps[i].output",
-      "ui_behavior": "按执行顺序追加显示输出",
+      "ui_behavior": "展示当前步骤为止累积的 System.out 输出（非逐行追加动画）",
       "common_confusions": [
         "控制台输出与变量值的区别"
       ]
@@ -72,9 +75,9 @@
     {
       "id": "ai_panel",
       "name": "AI 讲解面板",
-      "function": "展示 Agent 基于真实执行数据生成的讲解文本",
+      "function": "含三个分页：解说（自由问答）、复杂度（时间/空间复杂度）、算法（算法与数据结构标签，点击标签可发起解说）",
       "data_field": null,
-      "ui_behavior": "流式渲染 Agent 回答",
+      "ui_behavior": "解说页流式渲染 Agent 回答；复杂度页展示分析卡片；算法页展示可点击标签",
       "common_confusions": []
     },
     {
@@ -93,7 +96,7 @@
     "current_step_index": "当前步骤索引，0-based（对应 steps 数组下标）；展示给用户时 +1",
     "step_index": "step_facts 工具的 step_index 参数，0-based；展示给用户时 +1",
     "line": "该步对应的源码行号 → 前端高亮行",
-    "variables": "该步执行后的变量快照 → 变量卡片面板",
+    "variables": "该步执行后的变量快照（旧字段/无栈帧时回退来源）→ 变量卡片面板",
     "heap": "堆对象快照 → 堆面板",
     "stackFrames": "调用栈快照 → 调用栈面板",
     "output": "System.out 输出 → 控制台面板"

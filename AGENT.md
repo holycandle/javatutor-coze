@@ -55,6 +55,7 @@
 | 领域本体实现 | `docs/devlog/2026-08-19-javatutor-domain-ontology.md` | 结构化本体 + 常驻层/Judge 注入（129 passed） |
 | 评估报告 MD 实现 | `docs/devlog/2026-08-21-eval-report-md.md` | report.md 人读报告生成（133 passed） |
 | 执行上下文获取实现 | `docs/devlog/2026-08-23-execution-context-fetch.md` | fetch 工具 + 确定性节点 + 降级（148 passed） |
+| 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 
 ## 文档规范
 

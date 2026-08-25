@@ -3,6 +3,13 @@
     {"title": "JavaTutor 产品能力", "keywords": ["javatutor", "产品", "面板"], "category": "项目知识", "explanation": "JavaTutor 是 Java 算法可视化教学工具，包含编辑、运行、单步播放、变量快照、堆/栈、控制流、控制台、算法可视化与 AI 讲解面板。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
     {"title": "Agent 能力边界", "keywords": ["agent", "能力", "职责"], "category": "项目知识", "explanation": "Agent 负责基于真实执行数据讲解代码；不直接替学生写完整作业；算法动画由前端算法可视化提供，Agent 不生成 SVG。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
     {"title": "算法可视化引导", "keywords": ["动画", "可视化", "演示"], "category": "项目知识", "explanation": "学生请求动画/演示时，引导其使用前端「算法可视化」按钮；Agent 不生成动画。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
-    {"title": "复杂度分析", "keywords": ["复杂度", "算法标签", "analyze"], "category": "项目知识", "explanation": "每次运行代码后，Agent 会自动执行复杂度与算法/数据结构标签分析，结果供后续问答复用。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"}
+    {"title": "复杂度分析", "keywords": ["复杂度", "算法标签", "analyze"], "category": "项目知识", "explanation": "每次运行代码后，Agent 会自动执行复杂度与算法/数据结构标签分析，结果供后续问答复用。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-14"},
+    {"title": "内存监控面板结构", "keywords": ["内存监控", "栈区", "堆区", "面板布局", "内存"], "category": "项目知识", "explanation": "内存监控面板分左右两栏：左为栈区（调用栈 + 每个栈帧下的局部变量卡片），右为堆区（堆对象）。变量卡片不是独立面板，而是栈帧内的局部变量展示。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "变量卡片数据来源", "keywords": ["变量卡片", "局部变量", "stackFrames", "locals", "数据来源", "变量快照"], "category": "项目知识", "explanation": "变量卡片展示当前栈帧的局部变量与参数，数据主要来自 steps[i].stackFrames[*].locals（每个栈帧的局部变量）；steps[i].variables 是旧字段/无栈帧时的回退来源。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "单步播放机制", "keywords": ["单步播放", "高亮行", "步骤", "step", "播放"], "category": "项目知识", "explanation": "单步播放逐步骤展示执行过程，高亮当前步骤对应的源码行，并联动变量卡片、堆面板、调用栈、控制台同步刷新到该步骤的状态。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "堆对象与对象 id", "keywords": ["堆对象", "对象id", "引用", "堆", "heap", "对象"], "category": "项目知识", "explanation": "堆面板展示代码 new 出来的复杂对象（数组槽、对象字段、映射键值）。对象 id 用于在栈变量与堆对象之间建立引用关联，变量值变化时对应堆对象会荧光高亮。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "控制流图", "keywords": ["控制流图", "控制流", "流程图", "静态分析", "下钻"], "category": "项目知识", "explanation": "控制流图由源码静态分析生成（不依赖运行步骤数据），按当前高亮行定位对应节点，点击 call 节点可下钻到子方法。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "控制台输出", "keywords": ["控制台", "输出", "System.out", "打印", "console"], "category": "项目知识", "explanation": "控制台展示程序运行期间 System.out 捕获的输出，显示当前步骤为止累积的输出内容。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"},
+    {"title": "运行与提问工作流", "keywords": ["运行", "工作流", "使用流程", "提问", "如何用", "使用"], "category": "项目知识", "explanation": "典型使用流程：在编辑器写代码 → 点运行（后端插桩执行并采集 steps）→ 单步播放查看每步状态 → 在 AI 面板输入问题，Agent 基于真实执行数据回答。", "source": "知识库: JavaTutor项目", "retrieved_at": "2026-08-25"}
   ]
 }
