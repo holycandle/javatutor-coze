@@ -10,6 +10,8 @@ from tools.step_facts import step_facts
 
 MAX_ROUNDS = 3
 
+CONTEXT_UNAVAILABLE_ANSWER = "当前暂时无法获取这次代码运行的执行上下文，请重新运行代码后再提问。"
+
 
 def _resolve_model(model):
     """优先用传入的 model，否则从 LangGraph configurable 中取 chat_model."""
@@ -43,6 +45,13 @@ def _parse_tool(raw: str) -> dict | None:
 
 
 def main_agent_node(state, model=None) -> dict[str, Any]:
+    if state.get("fetch_context_failed") and not state.get("has_steps"):
+        return {
+            "answer": CONTEXT_UNAVAILABLE_ANSWER,
+            "tool_rounds": 0,
+            "tool_calls": [],
+            "step_memories": [],
+        }
     context = state.get("context_built", "")
     rounds = 0
     answer = ""

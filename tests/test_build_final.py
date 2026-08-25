@@ -66,3 +66,22 @@ def test_latency_ms_uses_request_started_at():
     latency = out["decision_trace"]["latency_ms"]
     assert isinstance(latency, (int, float))
     assert latency > 0, f"latency_ms 应为正数，实际 {latency}"
+
+
+def test_build_final_trace_includes_fetch_metrics():
+    state = {
+        "answer": "回答",
+        "run_id": "run-1",
+        "fetch_context_failed": False,
+        "fetch_context_latency_ms": 12.3,
+        "fetch_context_error": "",
+        "intent": "data_query",
+        "retrieved_chunks": [],
+        "tool_calls": [],
+    }
+    out = build_final(state)
+    trace = out["decision_trace"]
+    assert trace["run_id"] == "run-1"
+    assert trace["fetch_context_failed"] is False
+    assert trace["fetch_context_latency_ms"] == 12.3
+    assert trace["fetch_context_error"] == ""

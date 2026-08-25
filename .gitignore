@@ -54,3 +54,6 @@ __pycache__/
 
 # CodeGraph index
 .codegraph
+
+# IDEA
+.idea/
