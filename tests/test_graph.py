@@ -34,6 +34,12 @@ class TestGraphAssembly:
         assert "revise" in graph.nodes
         assert "save_session" in graph.nodes
         assert "final" in graph.nodes
+        assert "fetch_execution_context" in graph.nodes
+
+    def test_graph_wires_fetch_before_compaction(self):
+        graph = build_flow_graph()
+        assert ("parse_context", "fetch_execution_context") in graph.edges
+        assert ("fetch_execution_context", "context_compaction") in graph.edges
 
     def test_full_flow_compile_error(self):
         """全流程: compile_error 非空时路由到 debug 专家."""
@@ -242,3 +248,103 @@ def test_build_context_includes_ontology():
     assert "变量卡片" in text
     assert "堆面板" in text
     assert "禁止编造引擎内部机制" in text
+
+
+def test_graph_fetches_execution_context_from_new_envelope(monkeypatch):
+    def fake_fetch(state, run_id=None):
+        return {
+            "run_id": "run-1",
+            "source_code": "public class A {}",
+            "steps": [
+                {"step": 0, "line": 1, "variables": {"x": 1}},
+                {"step": 1, "line": 1, "variables": {"x": 2}},
+            ],
+            "steps_json": json.dumps(
+                [
+                    {"step": 0, "line": 1, "variables": {"x": 1}},
+                    {"step": 1, "line": 1, "variables": {"x": 2}},
+                ],
+                ensure_ascii=False,
+            ),
+            "steps_count": 2,
+            "has_steps": True,
+            "current_step_index": 1,
+            "current_line": 1,
+            "current_variables": {"x": 2},
+            "compile_error": "",
+            "has_error": False,
+            "algorithm_tags": [],
+            "fetch_context_failed": False,
+            "fetch_context_error": "",
+            "fetch_context_latency_ms": 1.0,
+            "run_context_memory": {
+                "run_id": "run-1",
+                "code_hash": "abc",
+                "steps_count": 2,
+                "current_step_index": 1,
+                "current_line": 1,
+                "algorithm_tags": [],
+            },
+        }
+
+    monkeypatch.setattr("graphs.javatutor.fetch_context.fetch_execution_context", fake_fetch)
+
+    class DeepModel:
+        def invoke(self, messages):
+            content = messages[0].content
+            if "算法分析" in content or "源代码" in content:
+                return AIMessage(content='{"complexity": {"time": "O(1)"}}')
+            if "教学主 Agent" in content:
+                return AIMessage(content="x 在第 2 步变成了 2")
+            if "回答评审" in content:
+                return AIMessage(content='{"pass": true, "issues": []}')
+            if "回答修订者" in content:
+                return AIMessage(content="x 在第 2 步变成了 2")
+            return AIMessage(content="回答")
+
+    payload = {
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "user_question": "x 怎么变了？",
+        "intent": "data_query",
+        "compile_error": "",
+    }
+    result = build_agent().builder.compile().invoke(
+        {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]},
+        config={"configurable": {"chat_model": DeepModel()}},
+    )
+    assert result.get("source_code") == "public class A {}"
+    assert result.get("steps_count") == 2
+    assert result.get("decision_trace", {}).get("run_id") == "run-1"
+
+
+def test_graph_fetch_failure_without_legacy_payload_returns_fixed_fallback(monkeypatch):
+    def fake_fetch(state, run_id=None):
+        return {
+            "fetch_context_failed": True,
+            "fetch_context_error": "HTTP 404",
+            "fetch_context_latency_ms": 1.0,
+            "fallback_reason": "fetch_execution_context failed: HTTP 404",
+        }
+
+    monkeypatch.setattr("graphs.javatutor.fetch_context.fetch_execution_context", fake_fetch)
+
+    class DeepModel:
+        def invoke(self, messages):
+            content = messages[0].content
+            if "算法分析" in content or "源代码" in content:
+                return AIMessage(content='{"complexity": {"time": "O(1)"}}')
+            return AIMessage(content="回答")
+
+    payload = {
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "user_question": "x 怎么变了？",
+        "intent": "data_query",
+        "compile_error": "",
+    }
+    result = build_agent().builder.compile().invoke(
+        {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]},
+        config={"configurable": {"chat_model": DeepModel()}},
+    )
+    assert "请重新运行代码后再提问" in result.get("answer", "")

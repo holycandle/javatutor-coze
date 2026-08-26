@@ -52,6 +52,15 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     analysis = state.get("analysis_result")
     if analysis:
         packets.append(ContextPacket(f"### 分析结果\n{json.dumps(analysis, ensure_ascii=False)[:500]}", relevance_score=0.9, metadata={"section": "Evidence"}))
+    run_memory = state.get("run_context_memory")
+    if run_memory:
+        packets.append(
+            ContextPacket(
+                f"### 运行上下文摘要\n{json.dumps(run_memory, ensure_ascii=False)[:300]}",
+                relevance_score=0.85,
+                metadata={"section": "Memory"},
+            )
+        )
     has_position = bool(state.get("has_steps")) or (
         state.get("current_step_index") not in (None, 0)
         or state.get("current_line") not in (None, 0)
