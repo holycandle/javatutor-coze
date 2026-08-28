@@ -411,8 +411,15 @@ def build_final(state: JavaTutorState) -> dict:
     answer = _sanitize_code_quotes(answer)
     answer = _strip_leaked_json(answer)
 
+    run_id = state.get("run_id", "")
+    # fetch_execution_context 是确定性 graph 节点（非 LLM 工具调用），其调用不进入主 Agent 的
+    # tool_calls。这里主动记录，让决策痕迹里能看到这次拉取发生了。
+    tool_calls = state.get("tool_calls") or []
+    if run_id:
+        tool_calls = [{"tool": "fetch_execution_context", "args": {"run_id": run_id}}, *tool_calls]
+
     trace = {
-        "run_id": state.get("run_id", ""),
+        "run_id": run_id,
         "fetch_context_failed": state.get("fetch_context_failed", False),
         "fetch_context_latency_ms": state.get("fetch_context_latency_ms", 0.0),
         "fetch_context_error": state.get("fetch_context_error", ""),
@@ -430,7 +437,7 @@ def build_final(state: JavaTutorState) -> dict:
         "critic_skipped": state.get("critic_skipped", False),
         "revise_skipped": state.get("revise_skipped", False),
         "compaction_mode": state.get("compaction_mode", "none"),
-        "tool_calls": state.get("tool_calls") or [],
+        "tool_calls": tool_calls,
         "token_usage": _estimate_token_usage(state),
     }
     trace_json = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))

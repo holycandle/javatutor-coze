@@ -42,7 +42,7 @@ flowchart TD
 
 - 输入：`run_id`、`session_id`、`user_question`、可选 `intent`。
 - 输出（`intent=analyze`）：结构化 JSON（复杂度、算法、数据结构标签），不经后续问答链路。
-- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记。
+- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 除主 Agent 的 LLM 工具调用外，也记录确定性节点 `fetch_execution_context`（排在最前）。
 
 ## 上手三件事
 
