@@ -25,6 +25,17 @@ def jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
+def memory_relevance(content, importance, query, semantic_weight=0.6, importance_weight=0.4) -> float:
+    """记忆包相关性：语义匹配（jaccard）与重要性地板的加权。
+
+    semantic_weight 支配（让『与当前问题相关』的记忆领先），importance_weight
+    提供地板（semantic_weight, importance_weight 和应为 1.0，权重可 A/B 调整）。
+    """
+    semantic = jaccard(query or "", content or "")
+    floor = 0.5 + float(importance or 0.0) * 0.5
+    return semantic_weight * semantic + importance_weight * floor
+
+
 def recency(timestamp: float, now: float | None = None) -> float:
     now = now or time.time()
     age_hours = max(0, (now - timestamp) / 3600)
@@ -88,7 +99,12 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
         )
     for m in memories or []:
         packets.append(
-            ContextPacket(m.get("content", ""), timestamp=float(m.get("created_at", time.time())), relevance_score=0.5 + float(m.get("importance", 0.5)) * 0.4, metadata={"section": "Memory"})
+            ContextPacket(
+                m.get("content", ""),
+                timestamp=float(m.get("created_at", time.time())),
+                relevance_score=memory_relevance(m.get("content", ""), float(m.get("importance", 0.5)), q),
+                metadata={"section": "Memory"},
+            )
         )
     for msg in (history or [])[-5:]:
         packets.append(

@@ -21,6 +21,20 @@ flowchart TD
     L --> M[build_final<br/>最终答案 + 决策痕迹 JSON]
 ```
 
+## 信息分层原则
+
+这条仓库里的「工具少」不是问题，是因为**绝大部分信息不需要 agent 主动取**。信息按走法分三类：
+
+| 信息 | 走法 | 为什么 |
+| --- | --- | --- |
+| 知识（RAG）、会话记忆 | **上下文工程**：预取，`build_context` 注入主模型 | 小而固定，预取便宜、确定性、可核查、省轮次 |
+| 单步执行证据 | **工具（JIT）**：主 Agent 按需调 `step_facts` | 量大、随问题变化，按需取 |
+
+明确**不做**的事（避免将来重复论证）：
+
+- **不**把 `search_knowledge` / MemoryTool 暴露成 agent 工具——记忆与知识共用上下文工程路线，且该单轮问答不需要四类记忆/图谱/多模态（见 `docs/spec/2026-08-29-memory-retrieval-context-engineering-design.md`）。
+- **不**加 `read_code` 工具——`source_code` 已经 `build_context` 注入上下文；长代码被 token 预算挤出是**上下文工程**问题，不是「缺工具」。
+
 ## 每步在做什么
 
 | 阶段 | 做什么 | 谁做 |
@@ -29,7 +43,7 @@ flowchart TD
 | `fetch_execution_context` | 按 `run_id` 向后端要源代码、步骤、当前执行位置 | 确定性请求 |
 | `context_compaction` | 对话或步骤太长时压缩，控制 token | 规则 |
 | `analyze_code` | 有代码就必跑，产出复杂度、算法、数据结构标签 | 确定性 |
-| `load_session` | 读这个会话之前留下的工作记忆 | 确定性 |
+| `load_session` | 读这个会话之前留下的工作记忆，按「与当前问题的相关性」挑选（候选 10 条） | 确定性 |
 | `retrieve_knowledge` | RAG 检索与问题相关的知识点，产出 `retrieved_chunks` | 确定性 |
 | `build_context` | 把系统提示、RAG 片段、记忆、执行证据拼成一份上下文 | 规则 |
 | `main_agent` | 理解问题、按需调 `step_facts` 取单步证据、组织回答 | LLM |
@@ -49,4 +63,6 @@ flowchart TD
 1. 改代码前先看 `AGENT.md` 和 `docs/local-dev-convention.md`。
 2. 只改业务目录，别动 Coze 平台外壳；验证跑 `uv run pytest tests/ -q` 和组件级评估。
 3. Codex 负责写 spec 和 plan，Claude Code 按 plan 执行，人负责 review。
+
+相关设计规格见 `docs/spec/`；记忆检索与上下文工程项目见 `docs/spec/2026-08-29-memory-retrieval-context-engineering-design.md`。
 

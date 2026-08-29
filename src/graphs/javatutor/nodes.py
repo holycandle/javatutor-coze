@@ -485,7 +485,7 @@ def load_session(state: JavaTutorState) -> dict:
     try:
         from learning.memory import get_memory_store
 
-        return {"memories": get_memory_store().search(session_id, limit=5)}
+        return {"memories": get_memory_store().search(session_id, limit=10)}
     except Exception:
         return {"memories": []}
 
