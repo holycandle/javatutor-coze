@@ -12,12 +12,12 @@
     "task_success_rate": 0.2759,
     "avg_latency": 16.614,
     "avg_token_usage": 1549.8,
-    "token_usage_sample_count": 29
+    "token_usage_sample_count": 29,
+    "grounding_verify_applicable": 17,
+    "grounding_verify_checked": 36,
+    "grounding_verify_violations": 3,
+    "grounding_verify_accuracy": 0.8235
   },
   "component": {},
-  "diff_vs_previous": {
-    "avg_score": 0.0,
-    "grounding_avg": 0.0,
-    "component_pass_rate": 0
-  }
+  "diff_vs_previous": {}
 }

@@ -103,12 +103,14 @@ def cmd_judge(args) -> int:
 
 
 def cmd_report(args) -> int:
+    from eval.runner.grounding import compute_grounding_verify
     from eval.runner.report import (
         compute_extended_metrics,
         diff,
         load_jsonl,
         resolve_commit,
         resolve_model,
+        resolve_previous_summary,
         summarize,
         write_report,
         write_summary,
@@ -118,11 +120,10 @@ def cmd_report(args) -> int:
     outputs = load_jsonl(args.round_dir / "answers.jsonl")
     judged = load_jsonl(args.round_dir / "judged.jsonl")
     extended = compute_extended_metrics(outputs, samples, judged)
+    extended.update(compute_grounding_verify(outputs, samples))
     summary = summarize(judged, component=None, extended=extended)
-    prev_dir = args.round_dir.parent / f"round-{max(1, _round_number(args.round_dir) - 1)}"
-    prev_path = prev_dir / "summary.json"
-    if prev_path.exists():
-        previous = json.loads(prev_path.read_text(encoding="utf-8"))
+    previous = resolve_previous_summary(args.round_dir)
+    if previous:
         summary["diff_vs_previous"] = diff(previous, summary)
     write_summary(args.round_dir / "summary.json", summary)
     report_path = write_report(
@@ -189,13 +190,6 @@ def cmd_export(args) -> int:
 
     export(args.round_dir, Path(args.out_dir), Path(args.samples))
     return 0
-
-
-def _round_number(round_dir: Path) -> int:
-    try:
-        return int(round_dir.name.rsplit("-", 1)[-1])
-    except (ValueError, IndexError):
-        return 1
 
 
 def main() -> int:

@@ -102,6 +102,7 @@ uv run python -c "import json;from pathlib import Path;p=Path('eval/archive/2026
 - `task_success_rate`：Judge correct 且命中 `expected_facts` 的比例。
 - `avg_latency`：远程端到端平均耗时。
 - `avg_token_usage`：prompt+completion 平均 token。
+- `grounding_verify_applicable` / `checked` / `violations` / `accuracy`：确定性 grounding 核对（不依赖 LLM）。基于本体数据契约规则，程序化验证回答的步骤号/行号/堆对象 id 是否在 steps 数据中真实存在；accuracy = 无违规样本数 / applicable 样本数，仅统计含非空 steps 的样本，可与 Judge 的 `grounding_avg` 交叉对照。
 
 ### 检索
 

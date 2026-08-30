@@ -1,7 +1,15 @@
 import json
 from pathlib import Path
 
-from eval.runner.report import diff, resolve_commit, resolve_model, summarize, write_report, write_summary
+from eval.runner.report import (
+    diff,
+    resolve_commit,
+    resolve_model,
+    resolve_previous_summary,
+    summarize,
+    write_report,
+    write_summary,
+)
 
 
 def test_summarize_computes_metrics():
@@ -119,6 +127,26 @@ def test_write_report_writes_md_with_sections(tmp_path):
     assert "avg_score" in md
 
 
+def test_write_report_includes_grounding_verify_metrics(tmp_path):
+    round_dir = _make_round(tmp_path)
+    summary = {
+        "e2e": {
+            "avg_score": 4.0,
+            "total": 2,
+            "grounding_verify_applicable": 2,
+            "grounding_verify_checked": 4,
+            "grounding_verify_violations": 1,
+            "grounding_verify_accuracy": 0.5,
+        },
+        "component": {},
+        "diff_vs_previous": {},
+    }
+    path = write_report(round_dir, summary, [], [], [])
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "grounding_verify_applicable" in md
+    assert "grounding_verify_accuracy" in md
+
+
 def test_write_report_includes_fallback_badcase(tmp_path):
     round_dir = _make_round(tmp_path)
     summary = {"e2e": {"avg_score": 5.0, "total": 1}, "component": {}, "diff_vs_previous": {}}
@@ -157,3 +185,24 @@ def test_resolve_model_and_commit(tmp_path):
     assert resolve_model(tmp_path / "missing") == "unknown"
     # 非 git 目录回退 unknown
     assert resolve_commit(tmp_path) == "unknown"
+
+
+def test_resolve_previous_summary_first_round_returns_none(tmp_path):
+    round_dir = tmp_path / "2026-08-17" / "round-1"
+    round_dir.mkdir(parents=True, exist_ok=True)
+    assert resolve_previous_summary(round_dir) is None
+
+
+def test_resolve_previous_summary_second_round_reads_prev(tmp_path):
+    archive = tmp_path / "2026-08-17"
+    prev = archive / "round-1"
+    prev.mkdir(parents=True, exist_ok=True)
+    (prev / "summary.json").write_text('{"e2e": {"avg_score": 4.0}}', encoding="utf-8")
+    result = resolve_previous_summary(archive / "round-2")
+    assert result == {"e2e": {"avg_score": 4.0}}
+
+
+def test_resolve_previous_summary_missing_prev_returns_none(tmp_path):
+    round_dir = tmp_path / "2026-08-17" / "round-3"
+    round_dir.mkdir(parents=True, exist_ok=True)
+    assert resolve_previous_summary(round_dir) is None
