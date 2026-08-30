@@ -55,7 +55,10 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     packets = []
     q = state.get("user_question", "")
     packets.append(ContextPacket(f"### 用户问题\n{q}", relevance_score=1.0, metadata={"section": "Task"}))
-    packets.append(ContextPacket(f"### 源代码\n```java\n{state.get('source_code', '')}\n```", relevance_score=0.8, metadata={"section": "Evidence"}))
+    # 源代码仅当读取工具已暂存 fetched_context.source_code 时注入，避免无条件强制填充整段代码。
+    # 整体代码由 agent 通过 fetch_execution_context 工具按需读取。
+    if (state.get("fetched_context") or {}).get("source_code"):
+        packets.append(ContextPacket(f"### 源代码\n```java\n{state.get('source_code', '')}\n```", relevance_score=0.8, metadata={"section": "Evidence"}))
     for chunk in state.get("retrieved_chunks") or []:
         packets.append(
             ContextPacket(f"[{chunk['source']}] {chunk['content'][:300]}", relevance_score=float(chunk.get("score", 0.5)), metadata={"section": "Evidence", "source": chunk["source"]})

@@ -1,90 +1,61 @@
 from tools.fetch_execution_context import fetch_execution_context
 
 
-class FakeResponse:
-    status_code = 200
-
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-def _success_payload():
-    return {
-        "run_id": "run-1",
-        "source_code": "public class A { int x = 1; }",
-        "steps": [
-            {"step": 0, "line": 1, "variables": {"x": 1}},
-            {"step": 1, "line": 1, "variables": {"x": 2}},
-        ],
-        "current_step_index": 1,
+def test_fetch_prefers_state_and_stores_fetched_context():
+    state = {
+        "run_id": "r1",
+        "source_code": "public class A {}\npublic class B {}",
+        "steps": [{"step_index": 0, "variables": {"x": 1}}],
+        "current_step_index": 0,
         "current_line": 1,
-        "compile_error": "",
-        "algorithm_tags": ["遍历"],
-        "expires_at": 1784736000,
     }
+    out = fetch_execution_context(state)
+    assert out["source_code"] == state["source_code"]
+    assert out["steps_count"] == 1
+    assert out["fetched_context"]["source_code"] == state["source_code"]
+    assert out["fetched_context"]["run_id"] == "r1"
+    assert out["stored"] is True
 
 
-def test_fetch_success_populates_state(monkeypatch):
-    captured = {}
-
-    def fake_get(url, headers, timeout):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["timeout"] = timeout
-        return FakeResponse(_success_payload())
-
-    monkeypatch.setattr("tools.fetch_execution_context.httpx.get", fake_get)
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-
-    assert captured["url"] == "http://localhost:8080/api/agent/execution-context/run-1"
-    assert captured["headers"]["X-Agent-Token"] == "secret-token"
-    assert out["source_code"] == "public class A { int x = 1; }"
-    assert out["current_step_index"] == 1
-    assert out["current_variables"] == {"x": 2}
-    assert out["fetch_context_failed"] is False
-    assert out["run_context_memory"]["run_id"] == "run-1"
-    assert "source_code" not in out["run_context_memory"]
-    assert "steps" not in out["run_context_memory"]
+def test_fetch_no_source_or_steps_returns_error():
+    out = fetch_execution_context({"run_id": "", "source_code": "", "steps": []})
+    assert out.get("fetch_context_failed") is True
+    assert out.get("error")
 
 
-def test_fetch_non_200_returns_failure(monkeypatch):
-    class ErrorResponse:
-        status_code = 404
+def test_fetch_schema_has_file_and_line_params():
+    from tools.fetch_execution_context import TOOL_SCHEMA
 
-        def json(self):
-            return {}
-
-    monkeypatch.setattr("tools.fetch_execution_context.httpx.get", lambda url, headers, timeout: ErrorResponse())
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
-    assert "404" in out["fetch_context_error"]
-    assert out["fallback_reason"].startswith("fetch_execution_context failed:")
+    props = TOOL_SCHEMA["parameters"]["properties"]
+    for k in ("run_id", "file", "start_line", "end_line"):
+        assert k in props
 
 
-def test_fetch_missing_required_fields_returns_failure(monkeypatch):
-    monkeypatch.setattr(
-        "tools.fetch_execution_context.httpx.get",
-        lambda url, headers, timeout: FakeResponse({"run_id": "run-1"}),
-    )
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
+def test_fetch_slices_code_by_line_range():
+    state = {"run_id": "r1", "source_code": "line1\nline2\nline3\nline4", "steps": []}
+    out = fetch_execution_context(state, start_line=2, end_line=3)
+    assert out["code"] == "line2\nline3"
 
 
-def test_fetch_missing_env_config_returns_failure(monkeypatch):
-    """URL 或 token 未配置时返回失败，而非抛异常."""
-    monkeypatch.delenv("JAVATUTOR_EXECUTION_CONTEXT_URL", raising=False)
-    monkeypatch.delenv("JAVATUTOR_AGENT_TOKEN", raising=False)
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
+def test_fetch_does_not_import_httpx_or_os():
+    import importlib
+    import sys
+
+    sys.modules.pop("tools.fetch_execution_context", None)
+    mod = importlib.import_module("tools.fetch_execution_context")
+    assert not hasattr(mod, "httpx")
+    assert not hasattr(mod, "os")
+
+
+def test_fetch_sets_compact_run_context_memory_without_code_or_steps():
+    state = {
+        "run_id": "r1",
+        "source_code": "code",
+        "steps": [{}],
+        "current_step_index": 0,
+        "current_line": 1,
+    }
+    out = fetch_execution_context(state)
+    rcm = out["run_context_memory"]
+    assert "source_code" not in rcm and "steps" not in rcm
+    assert rcm["steps_count"] == 1

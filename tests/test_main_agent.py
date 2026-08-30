@@ -13,6 +13,16 @@ class SequenceModel:
         return AIMessage(content=self.responses.pop(0))
 
 
+class FakeModel:
+    """每次调用都返回同一固定内容（用于单轮即终止/重复调用的场景）。"""
+
+    def __init__(self, content):
+        self.content = content
+
+    def invoke(self, messages):
+        return AIMessage(content=self.content)
+
+
 STATE = {
     "context_built": "[Evidence]\n步骤数据",
     "steps": [
@@ -84,15 +94,26 @@ def test_main_agent_unknown_tool_not_leaked_as_answer():
     assert "no_such_tool" not in out["answer"]
 
 
-def test_main_agent_returns_fixed_fallback_when_context_unavailable():
+def test_main_agent_dispatches_fetch_execution_context():
+    model = SequenceModel(
+        ['{"tool": "fetch_execution_context", "args": {"run_id": "r1"}}', "已读取代码"]
+    )
     state = {
-        "context_built": "",
-        "fetch_context_failed": True,
-        "has_steps": False,
+        "run_id": "r1",
+        "source_code": "public class A {}",
+        "steps": [{"step_index": 0, "variables": {"x": 1}}],
+        "current_step_index": 0,
+        "current_line": 1,
+        "context_built": "context",
     }
-    model = SequenceModel(["模型不应被调用"])
     out = main_agent_node(state, model=model)
-    assert "请重新运行代码后再提问" in out["answer"]
-    assert out["tool_rounds"] == 0
-    assert out["tool_calls"] == []
-    assert out["step_memories"] == []
+    assert any(tc["tool"] == "fetch_execution_context" for tc in out["tool_calls"])
+    assert out["fetched_context"]["run_id"] == "r1"
+
+
+def test_main_agent_fetch_failure_appends_error_and_continues():
+    out = main_agent_node(
+        {"run_id": "", "source_code": "", "steps": [], "context_built": "c"},
+        model=FakeModel('{"tool": "fetch_execution_context", "args": {}}'),
+    )
+    assert out["answer"]

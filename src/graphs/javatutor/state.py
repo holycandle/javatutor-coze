@@ -143,3 +143,7 @@ class JavaTutorState(TypedDict, total=False):
 
     run_context_memory: dict
     """本轮运行上下文的紧凑摘要，禁止保存完整 source_code 与 steps."""
+
+    fetched_context: dict
+    """读取工具暂存的执行上下文快照：run_id / source_code / steps / current_step_index /
+    current_line / compile_error / algorithm_tags / code_hash / fetched_at / fetch_context_latency_ms."""

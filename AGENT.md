@@ -17,8 +17,10 @@
 | 评估系统 plan | 已执行 |
 | 架构改进 spec | 已评审 |
 | 架构改进 plan | 已执行 |
-| 执行上下文拉取 spec | 待执行 |
-| 执行上下文拉取 plan | 待执行 |
+| 执行上下文拉取 spec | 已执行 |
+| 执行上下文拉取 plan | 已执行 |
+| 执行上下文作为工具 spec | 已执行 |
+| 执行上下文作为工具 plan | 已执行 |
 
 ## 规约与文档索引
 
@@ -55,6 +57,9 @@
 | 领域本体实现 | `docs/devlog/2026-08-19-javatutor-domain-ontology.md` | 结构化本体 + 常驻层/Judge 注入（129 passed） |
 | 评估报告 MD 实现 | `docs/devlog/2026-08-21-eval-report-md.md` | report.md 人读报告生成（133 passed） |
 | 执行上下文获取实现 | `docs/devlog/2026-08-23-execution-context-fetch.md` | fetch 工具 + 确定性节点 + 降级（148 passed） |
+| 执行上下文作为工具设计 | `docs/spec/2026-08-30-fetch-execution-context-as-tool-design.md` | fetch_execution_context 改为 agent 按需调用的纯 state 读取工具 |
+| 执行上下文作为工具计划 | `docs/plan/2026-08-30-fetch-execution-context-as-tool-plan.md` | 纯 state 读取工具 TDD 实施计划 |
+| 执行上下文作为工具实现 | `docs/devlog/2026-08-30-fetch-execution-context-as-tool.md` | 工具化重构，纯 state 读取（159 passed） |
 | 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 
 ## 文档规范

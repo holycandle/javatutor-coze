@@ -67,3 +67,20 @@ def test_gather_includes_run_context_memory():
     combined = "\n".join(p.content for p in packets)
     assert "运行上下文摘要" in combined
     assert "code_hash" in combined
+
+
+def test_gather_does_not_inject_source_code_without_fetched_context():
+    """无 fetched_context 时不再无条件注入整段源代码，交给 agent 按需读取。"""
+    packets = gather({"user_question": "q", "source_code": "public class A {}"}, history=[], memories=[])
+    assert not any("### 源代码" in p.content for p in packets)
+
+
+def test_gather_injects_position_but_not_code():
+    """有执行位置时注入位置包，但仍不注入整段代码。"""
+    packets = gather(
+        {"user_question": "q", "current_step_index": 1, "current_line": 4, "has_steps": True, "steps_count": 5},
+        history=[],
+        memories=[],
+    )
+    texts = [p.content for p in packets]
+    assert any("### 当前执行位置" in t for t in texts)

@@ -1,20 +1,32 @@
-"""从 JavaTutor 后端按 run_id 获取运行上下文。"""
+"""从当前 state 读取执行上下文的读取工具（纯 state 读取，不发 HTTP）。
+
+本次重构：不再依赖后端 HTTP 快照，改为从入站 state 的 ``source_code`` / ``steps`` /
+``current_step_index`` / ``current_line`` 读取（永远新鲜）。读到的完整执行上下文写入
+``state.fetched_context`` 暂存，同时修复标准字段供 ``step_facts`` / ``analyze_code_node`` /
+真实行号解析复用。``run_id`` / ``file`` / ``start_line`` / ``end_line`` 参数为多文件与长代码
+预留，本轮只实现单入口/整段读取。
+"""
 
 import hashlib
 import json
-import os
 import time
 from typing import Any
 
-import httpx
-
 TOOL_SCHEMA = {
     "name": "fetch_execution_context",
-    "description": "从 JavaTutor 后端获取指定 run_id 的源代码、执行步骤和当前执行位置",
+    "description": (
+        "读取本次运行的执行上下文（源代码、执行步骤、当前执行位置）。"
+        "读取结果会暂存到状态，供后续推理与单步查询复用；"
+        "回答需要代码或执行证据的问题前应先调用本工具。"
+    ),
     "parameters": {
         "type": "object",
-        "properties": {"run_id": {"type": "string"}},
-        "required": ["run_id"],
+        "properties": {
+            "run_id": {"type": "string", "description": "可选，默认使用当前上下文的 run_id"},
+            "file": {"type": "string", "description": "预留：多文件模式下要读取的文件名，缺省读取主入口/当前代码"},
+            "start_line": {"type": "integer", "description": "预留：只读取该行开始的代码片段"},
+            "end_line": {"type": "integer", "description": "预留：只读取到该行"},
+        },
     },
 }
 
@@ -29,54 +41,39 @@ def _current_variables(steps: list[dict], current_step_index: int) -> dict:
     return {}
 
 
-def _failure(error: str, latency_ms: float) -> dict[str, Any]:
-    return {
-        "fetch_context_failed": True,
-        "fetch_context_error": error,
-        "fetch_context_latency_ms": latency_ms,
-        "fallback_reason": f"fetch_execution_context failed: {error}",
-    }
+def _slice(source: str, start_line=None, end_line=None) -> str:
+    """1-based 行切片；未指定则返回整段代码。"""
+    if start_line is None and end_line is None:
+        return source
+    lines = source.splitlines()
+    s = int(start_line) - 1 if start_line is not None else 0
+    e = int(end_line) if end_line is not None else len(lines)
+    s = max(0, s)
+    e = min(len(lines), e)
+    return "\n".join(lines[s:e])
 
 
-def fetch_execution_context(state: dict, run_id: str | None = None) -> dict[str, Any]:
-    """从 JavaTutor 后端获取运行上下文，返回状态更新字典。"""
-    started = time.perf_counter()
-    resolved_run_id = run_id if run_id is not None else state.get("run_id")
-    base_url = os.getenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "").rstrip("/")
-    token = os.getenv("JAVATUTOR_AGENT_TOKEN", "")
+def fetch_execution_context(
+    state: dict, run_id=None, file=None, start_line=None, end_line=None
+) -> dict[str, Any]:
+    """从 state 读取执行上下文，返回给模型看的结果 + 写进 state 的暂存。
 
-    if not resolved_run_id:
-        return _failure("run_id 为空", 0.0)
-    if not base_url:
-        return _failure("JAVATUTOR_EXECUTION_CONTEXT_URL 未配置", 0.0)
-    if not token:
-        return _failure("JAVATUTOR_AGENT_TOKEN 未配置", 0.0)
-
-    headers = {"Accept": "application/json", "X-Agent-Token": token}
-    try:
-        response = httpx.get(f"{base_url}/{resolved_run_id}", headers=headers, timeout=3.0)
-        if response.status_code != 200:
-            latency = round((time.perf_counter() - started) * 1000, 1)
-            return _failure(f"HTTP {response.status_code}", latency)
-        data = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        latency = round((time.perf_counter() - started) * 1000, 1)
-        return _failure(type(exc).__name__, latency)
-
-    source_code = data.get("source_code")
-    steps = data.get("steps")
-    if source_code is None or steps is None:
-        latency = round((time.perf_counter() - started) * 1000, 1)
-        return _failure("响应缺少 source_code 或 steps", latency)
-    if not isinstance(steps, list):
-        latency = round((time.perf_counter() - started) * 1000, 1)
-        return _failure("steps 不是数组", latency)
-
-    current_step_index = data.get("current_step_index", 0)
-    current_line = data.get("current_line", 1)
+    失败时绝不抛异常，返回结构化错误，且不写坏 state。
+    """
+    resolved_run_id = run_id or state.get("run_id", "")
+    source_code = state.get("source_code", "")
+    steps = state.get("steps") or []
+    if not source_code and not steps:
+        return {
+            "error": "当前没有可用的执行上下文（源代码/步骤缺失），请重新运行代码后再提问。",
+            "fetch_context_failed": True,
+            "fetch_context_latency_ms": 0.0,
+        }
+    code = _slice(source_code, start_line, end_line)
+    current_step_index = state.get("current_step_index", 0)
+    current_line = state.get("current_line", 1)
     current_variables = _current_variables(steps, current_step_index)
-    latency = round((time.perf_counter() - started) * 1000, 1)
-
+    latency = 0.0
     return {
         "run_id": resolved_run_id,
         "source_code": source_code,
@@ -87,18 +84,34 @@ def fetch_execution_context(state: dict, run_id: str | None = None) -> dict[str,
         "current_step_index": current_step_index,
         "current_line": current_line,
         "current_variables": current_variables,
-        "compile_error": data.get("compile_error", ""),
-        "has_error": bool((data.get("compile_error") or "").strip()),
-        "algorithm_tags": data.get("algorithm_tags") or [],
+        "compile_error": state.get("compile_error", ""),
+        "has_error": bool((state.get("compile_error") or "").strip()),
+        "algorithm_tags": state.get("algorithm_tags") or [],
         "fetch_context_failed": False,
         "fetch_context_error": "",
         "fetch_context_latency_ms": latency,
+        "stored": True,
+        "fetched_from_state": True,
+        "code": code,
+        "fetched_context": {
+            "run_id": resolved_run_id,
+            "source_code": source_code,
+            "steps": steps,
+            "steps_count": len(steps),
+            "current_step_index": current_step_index,
+            "current_line": current_line,
+            "compile_error": state.get("compile_error", ""),
+            "algorithm_tags": state.get("algorithm_tags") or [],
+            "code_hash": hashlib.sha256(source_code.encode("utf-8")).hexdigest(),
+            "fetched_at": time.time(),
+            "fetch_context_latency_ms": latency,
+        },
         "run_context_memory": {
             "run_id": resolved_run_id,
             "code_hash": hashlib.sha256(source_code.encode("utf-8")).hexdigest(),
             "steps_count": len(steps),
             "current_step_index": current_step_index,
             "current_line": current_line,
-            "algorithm_tags": data.get("algorithm_tags") or [],
+            "algorithm_tags": state.get("algorithm_tags") or [],
         },
     }

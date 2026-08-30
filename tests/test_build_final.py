@@ -87,8 +87,8 @@ def test_build_final_trace_includes_fetch_metrics():
     assert trace["fetch_context_error"] == ""
 
 
-def test_build_final_records_fetch_execution_context_in_tool_calls():
-    """有 run_id 时，fetch_execution_context 应记录进决策痕迹的 tool_calls（排在最前）。"""
+def test_build_final_preserves_tool_calls_without_injecting_fetch():
+    """有 run_id 时也不再手动补记 fetch_execution_context；tool_calls 由 main_agent 真实产生。"""
     state = {
         "answer": "回答",
         "run_id": "run-1",
@@ -96,12 +96,11 @@ def test_build_final_records_fetch_execution_context_in_tool_calls():
         "fetch_context_latency_ms": 12.3,
         "intent": "data_query",
         "retrieved_chunks": [],
-        "tool_calls": [],
+        "tool_calls": [{"tool": "step_facts", "args": {"step_index": 0, "line": 1}}],
     }
     out = build_final(state)
     trace = out["decision_trace"]
-    assert trace["tool_calls"][0]["tool"] == "fetch_execution_context"
-    assert trace["tool_calls"][0]["args"]["run_id"] == "run-1"
+    assert trace["tool_calls"] == [{"tool": "step_facts", "args": {"step_index": 0, "line": 1}}]
 
 
 def test_build_final_no_run_id_does_not_record_fetch_tool():

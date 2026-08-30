@@ -412,11 +412,8 @@ def build_final(state: JavaTutorState) -> dict:
     answer = _strip_leaked_json(answer)
 
     run_id = state.get("run_id", "")
-    # fetch_execution_context 是确定性 graph 节点（非 LLM 工具调用），其调用不进入主 Agent 的
-    # tool_calls。这里主动记录，让决策痕迹里能看到这次拉取发生了。
+    # fetch_execution_context 已作为主 Agent 工具循环的 LLM 工具调用真实产生，无需在此补记。
     tool_calls = state.get("tool_calls") or []
-    if run_id:
-        tool_calls = [{"tool": "fetch_execution_context", "args": {"run_id": run_id}}, *tool_calls]
 
     trace = {
         "run_id": run_id,
