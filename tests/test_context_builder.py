@@ -84,3 +84,39 @@ def test_gather_injects_position_but_not_code():
     )
     texts = [p.content for p in packets]
     assert any("### 当前执行位置" in t for t in texts)
+
+
+def test_gather_position_annotates_current_step_file():
+    """当前执行位置包应标注当前步所在文件（定位只认当前步，prompt 已承诺该标注）。"""
+    packets = gather(
+        {"user_question": "q", "current_step_index": 1, "current_line": 4,
+         "current_step_file": "Other.java", "has_steps": True, "steps_count": 5},
+        history=[],
+        memories=[],
+    )
+    pos = next(p.content for p in packets if "### 当前执行位置" in p.content)
+    assert "当前步所在文件: Other.java" in pos
+
+
+def test_gather_injects_project_overview():
+    state = {
+        "user_question": "跨文件关系？",
+        "files": {"A.java": "class A {}", "B.java": "interface B"},
+        "retrieved_chunks": [],
+        "analysis_result": None,
+        "run_context_memory": None,
+    }
+    packets = gather(state)
+    overview = [
+        p
+        for p in packets
+        if p.metadata.get("section") == "Evidence" and p.content.startswith("### 项目结构")
+    ]
+    assert overview, "应注入项目结构概览"
+    assert "A.java" in overview[0].content and "B.java" in overview[0].content
+
+
+def test_gather_without_files_no_overview():
+    state = {"user_question": "q", "files": {}, "retrieved_chunks": []}
+    packets = gather(state)
+    assert not any(p.content.startswith("### 项目结构") for p in packets)

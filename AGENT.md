@@ -60,6 +60,9 @@
 | 执行上下文作为工具设计 | `docs/spec/2026-08-30-fetch-execution-context-as-tool-design.md` | fetch_execution_context 改为 agent 按需调用的纯 state 读取工具 |
 | 执行上下文作为工具计划 | `docs/plan/2026-08-30-fetch-execution-context-as-tool-plan.md` | 纯 state 读取工具 TDD 实施计划 |
 | 执行上下文作为工具实现 | `docs/devlog/2026-08-30-fetch-execution-context-as-tool.md` | 工具化重构，纯 state 读取（159 passed） |
+| 多文件项目理解设计 | `docs/spec/2026-08-30-multifile-whole-project-design.md` | 概览+按需读：恒注入项目结构概览 + 主入口，其他文件按需读 |
+| 多文件项目理解计划 | `docs/plan/2026-08-30-multifile-whole-project-plan.md` | 多文件读取 TDD 实施计划 |
+| 多文件项目理解实现 | `docs/devlog/2026-08-30-multifile-whole-project.md` | file 参数激活 + 概览注入 + step_facts 按当前步文件（171 passed） |
 | 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 
 ## 文档规范

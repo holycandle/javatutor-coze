@@ -42,6 +42,18 @@ def recency(timestamp: float, now: float | None = None) -> float:
     return max(0.1, math.exp(-0.1 * age_hours / 24))
 
 
+_TYPE_RE = re.compile(r"\b(?:class|interface|record|enum|@interface)\s+([A-Za-z_][\w]*)")
+
+
+def _file_type_hint(code: str) -> str:
+    """从代码里提炼类型提示：首个 class/interface/record/enum 名，无则行数。"""
+    m = _TYPE_RE.search(code or "")
+    if m:
+        return m.group(1)
+    lines = (code or "").splitlines()
+    return f"{len(lines)} 行"
+
+
 class ContextPacket:
     def __init__(self, content, timestamp=None, token_count=None, relevance_score=0.5, metadata=None):
         self.content = content
@@ -55,6 +67,21 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     packets = []
     q = state.get("user_question", "")
     packets.append(ContextPacket(f"### 用户问题\n{q}", relevance_score=1.0, metadata={"section": "Task"}))
+    # 项目结构概览：仅当 files 非空时注入，token 极小；其他文件由 agent 按需读。
+    project_files = state.get("files") or {}
+    if project_files:
+        overview_lines = [
+            f"- {name} — {_file_type_hint(code)}"
+            for name, code in sorted(project_files.items())
+        ]
+        packets.append(
+            ContextPacket(
+                "### 项目结构\n" + "\n".join(overview_lines)
+                + "\n\n需要某个文件内容时，用 fetch_execution_context 的 file 参数读取；默认读主入口。",
+                relevance_score=0.75,
+                metadata={"section": "Evidence"},
+            )
+        )
     # 源代码仅当读取工具已暂存 fetched_context.source_code 时注入，避免无条件强制填充整段代码。
     # 整体代码由 agent 通过 fetch_execution_context 工具按需读取。
     if (state.get("fetched_context") or {}).get("source_code"):
@@ -90,10 +117,12 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
             if state.get("has_steps")
             else "- 总步骤数: 未提供（步骤数据缺失）"
         )
+        current_step_file = state.get("current_step_file", "")
         packets.append(
             ContextPacket(
                 f"### 当前执行位置\n"
                 f"- 当前步骤索引: {index}（展示为第 {display_index} 步）\n"
+                f"- 当前步所在文件: {current_step_file or '未提供'}\n"
                 f"- 当前行号: {state.get('current_line', '')}\n"
                 f"{total_steps_text}",
                 relevance_score=0.9,

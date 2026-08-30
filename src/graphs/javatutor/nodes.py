@@ -109,6 +109,8 @@ def _parse_json_str(content: str | list) -> dict:
 
 def _parse_json_dict(data: dict) -> dict:
     """从已解析的 dict 中提取字段，返回状态更新."""
+    from tools.fetch_execution_context import normalize_files
+
     source_code = data.get("source_code", "")
     steps = data.get("steps", [])
     current_step_index = data.get("current_step_index", 0)
@@ -119,11 +121,15 @@ def _parse_json_dict(data: dict) -> dict:
     compile_error = data.get("compile_error", "")
     intent = data.get("intent", "")
     algorithm_tags = data.get("algorithm_tags") or []
+    files = normalize_files(data.get("files"))
+    entry_file = str(data.get("entry_file") or "")
 
-    # 提取当前步骤的变量快照
+    # 提取当前步骤的变量快照 + 当前步所在文件
     current_variables = {}
+    current_step_file = ""
     if steps and isinstance(steps, list) and 0 <= current_step_index < len(steps):
         current_variables = steps[current_step_index].get("variables", {})
+        current_step_file = steps[current_step_index].get("file", "") or ""
 
     return {
         "source_code": source_code,
@@ -145,6 +151,9 @@ def _parse_json_dict(data: dict) -> dict:
             else conservative_intent(user_question, compile_error)
         ),
         "algorithm_tags": algorithm_tags,
+        "files": files,
+        "entry_file": entry_file,
+        "current_step_file": current_step_file,
         "fallback_reason": "",
         "request_started_at": time.time(),
     }

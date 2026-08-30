@@ -27,3 +27,27 @@ def test_step_facts_returns_evidence_and_diff():
 def test_step_facts_out_of_range():
     out = step_facts(STATE, step_index=99)
     assert out["error"]
+
+
+def test_step_facts_uses_current_step_file():
+    """多文件下按当前执行步所在文件取行号码，而非激活文件 source_code。"""
+    state = {
+        "source_code": "class Main {}",
+        "steps": [{"step": 0, "file": "Other.java", "line": 1, "variables": {"x": 1}}],
+        "current_step_index": 0,
+        "current_step_file": "Other.java",
+        "files": {"Other.java": "package other;\nclass Other {"},
+    }
+    out = step_facts(state, step_index=0)
+    assert out["error"] == ""
+    assert out["evidence"]["file"] == "Other.java"
+    # 行 1 来自 Other.java 的第 1 行，而非 source_code
+    assert out["evidence"]["line_text"] == "package other;"
+
+
+def test_step_facts_without_files_falls_back_to_source_code():
+    """无多文件/无 current_step_file 时回退 source_code（单文件行为不变）。"""
+    out = step_facts(STATE, step_index=0)
+    assert out["error"] == ""
+    assert out["evidence"]["file"] == ""
+    assert out["evidence"]["line_text"] == "int x = 1;"
