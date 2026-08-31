@@ -99,6 +99,9 @@ def _resolve_code(state: dict, file=None) -> tuple[str, str, dict]:
                     key = name
                     break
         if key is None:
+            # 单文件（files 为空）→ 该 file 即主入口，回退 source_code；多文件未命中才报错。
+            if not files and state.get("source_code"):
+                return state.get("source_code"), str(file), {}
             return "", str(file), {
                 "error": f"文件不存在：{file}（项目结构中的文件：{sorted(files)}）",
                 "fetch_context_failed": True,

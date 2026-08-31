@@ -127,6 +127,20 @@ def test_normalize_files_variants():
     assert normalize_files([{"name": "D.java"}]) == {}
 
 
+def test_single_file_file_param_falls_back_to_source_code():
+    """单文件（files 为空）时，即便 agent 传 file=Main.java 也应回退 source_code，而非报错。"""
+    state = {
+        "source_code": "class MaxSubarray {\n  public static void main(String[] a) {}\n}",
+        "steps": [],
+        "files": {},
+    }
+    r = fetch_execution_context(state, file="Main.java")
+    assert r["code"] == state["source_code"]
+    assert not r.get("error")  # 成功回退，未报文件不存在
+    assert r["file"] == "Main.java"
+    assert r["fetch_context_failed"] is False
+
+
 def test_no_http_env_dependency_in_tool_module():
     import tools.fetch_execution_context as mod
 

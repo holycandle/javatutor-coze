@@ -15,9 +15,11 @@ TOOL_SCHEMA = {
 }
 
 
-def _line_text(code: str, line) -> str:
+def _line_text(code: str, line, fallback_line=None) -> str:
+    """取某行文本。line 为 None/0/非法时回退到 fallback_line（该步真实行号），避免误判越界。"""
+    candidate = line if line not in (None, 0, "0", "") else fallback_line
     try:
-        idx = int(line) - 1
+        idx = int(candidate if candidate is not None else 1) - 1
         lines = code.splitlines()
         if 0 <= idx < len(lines):
             return lines[idx].strip()
@@ -47,7 +49,21 @@ def step_facts(state, step_index=None, line=None, file=None) -> dict[str, Any]:
         idx = int(step_index)
         step = steps[idx]
     except (IndexError, TypeError, ValueError):
-        return {"error": f"step_index {step_index} 不在范围内", "evidence": {}, "diff": []}
+        count = len(steps)
+        hint = ""
+        # 用户口吻的「第 N 步」常是 1-based（展示序），工具用 0-based step_index=N-1。
+        # 越界时若 N-1 落在合法区间，给出换算建议，帮 agent 自纠。
+        if isinstance(step_index, int) and step_index > 0 and step_index - 1 < count:
+            hint = f"若你指的第 {step_index} 步是展示序（1-based），应传 step_index={step_index - 1}"
+        else:
+            hint = "可用范围请以 steps_count 为准"
+        return {
+            "error": f"step_index {step_index} 不在可用范围（0..{count - 1}，共 {count} 步）。{hint}",
+            "steps_count": count,
+            "current_step_index": state.get("current_step_index", 0),
+            "evidence": {},
+            "diff": [],
+        }
 
     file_name, code = _evidence_source(state, file=file)
     evidence = {
@@ -56,7 +72,7 @@ def step_facts(state, step_index=None, line=None, file=None) -> dict[str, Any]:
         "stackFrames": step.get("stackFrames", []),
         "output": step.get("output"),
         "file": file_name,
-        "line_text": _line_text(code, line if line is not None else step.get("line", 1)),
+        "line_text": _line_text(code, line, fallback_line=step.get("line", 1)),
     }
     diff = []
     if idx > 0:
