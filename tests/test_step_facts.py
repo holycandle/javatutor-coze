@@ -27,6 +27,17 @@ def test_step_facts_returns_evidence_and_diff():
 def test_step_facts_out_of_range():
     out = step_facts(STATE, step_index=99)
     assert out["error"]
+    assert out["steps_count"] == 2  # 越界恒带 steps_count，供 agent 掌握可用范围
+    assert "可用范围请以 steps_count 为准" in out["error"]  # 远超时不给无效换算
+    assert out["evidence"] == {}
+
+
+def test_step_facts_out_of_range_off_by_one_hint():
+    """越界恰为 1-based 展示序时给出换算建议（第 N 步 = step_index N-1）。"""
+    out = step_facts(STATE, step_index=2)  # count=2，用户指第 2 步，step_index=1 合法
+    assert out["error"]
+    assert out["steps_count"] == 2
+    assert "step_index=1" in out["error"]
 
 
 def test_step_facts_uses_current_step_file():

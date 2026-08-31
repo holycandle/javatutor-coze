@@ -113,12 +113,15 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
             context += _handle_fetch(tool_calls, fetched_state_updates, state, args)
         elif tool["tool"] == "step_facts":
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
-            tool_calls.append({"tool": "step_facts", "args": args})
             try:
                 result = step_facts(state, **args)
             except TypeError as exc:
                 # 参数含未知键或非法类型时给出结构化错误，而不是中断循环
                 result = {"error": f"step_facts 参数非法: {exc}", "evidence": {}, "diff": []}
+            # 记录参数 + 返回值（截断）供决策痕迹诊断：能看清是越界报错还是返回了证据
+            tool_calls.append(
+                {"tool": "step_facts", "args": args, "result": json.dumps(result, ensure_ascii=False)[:300]}
+            )
             if not result.get("error"):
                 step_memories.append(
                     {

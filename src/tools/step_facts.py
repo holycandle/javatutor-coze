@@ -49,9 +49,17 @@ def step_facts(state, step_index=None, line=None, file=None) -> dict[str, Any]:
         idx = int(step_index)
         step = steps[idx]
     except (IndexError, TypeError, ValueError):
+        count = len(steps)
+        hint = ""
+        # 用户口吻的「第 N 步」常是 1-based（展示序），工具用 0-based step_index=N-1。
+        # 越界时若 N-1 落在合法区间，给出换算建议，帮 agent 自纠。
+        if isinstance(step_index, int) and step_index > 0 and step_index - 1 < count:
+            hint = f"若你指的第 {step_index} 步是展示序（1-based），应传 step_index={step_index - 1}"
+        else:
+            hint = "可用范围请以 steps_count 为准"
         return {
-            "error": f"step_index {step_index} 不在可用范围（0..{len(steps) - 1}，共 {len(steps)} 步）",
-            "steps_count": len(steps),
+            "error": f"step_index {step_index} 不在可用范围（0..{count - 1}，共 {count} 步）。{hint}",
+            "steps_count": count,
             "current_step_index": state.get("current_step_index", 0),
             "evidence": {},
             "diff": [],

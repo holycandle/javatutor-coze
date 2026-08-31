@@ -37,7 +37,9 @@ def test_main_agent_calls_step_facts_then_answers():
     model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"])
     out = main_agent_node(STATE, model=model)
     assert out["tool_rounds"] == 2
-    assert out["tool_calls"] == [{"tool": "step_facts", "args": {"step_index": 1}}]
+    assert out["tool_calls"][0]["tool"] == "step_facts"
+    assert out["tool_calls"][0]["args"] == {"step_index": 1}
+    assert "result" in out["tool_calls"][0]  # 返回值被截断记录，供决策痕迹诊断
     assert "x 变成了 2" in out["answer"]
 
 
