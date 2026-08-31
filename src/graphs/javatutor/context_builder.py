@@ -25,10 +25,33 @@ def jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
+def memory_relevance(content, importance, query, semantic_weight=0.6, importance_weight=0.4) -> float:
+    """记忆包相关性：语义匹配（jaccard）与重要性地板的加权。
+
+    semantic_weight 支配（让『与当前问题相关』的记忆领先），importance_weight
+    提供地板（semantic_weight, importance_weight 和应为 1.0，权重可 A/B 调整）。
+    """
+    semantic = jaccard(query or "", content or "")
+    floor = 0.5 + float(importance or 0.0) * 0.5
+    return semantic_weight * semantic + importance_weight * floor
+
+
 def recency(timestamp: float, now: float | None = None) -> float:
     now = now or time.time()
     age_hours = max(0, (now - timestamp) / 3600)
     return max(0.1, math.exp(-0.1 * age_hours / 24))
+
+
+_TYPE_RE = re.compile(r"\b(?:class|interface|record|enum|@interface)\s+([A-Za-z_][\w]*)")
+
+
+def _file_type_hint(code: str) -> str:
+    """从代码里提炼类型提示：首个 class/interface/record/enum 名，无则行数。"""
+    m = _TYPE_RE.search(code or "")
+    if m:
+        return m.group(1)
+    lines = (code or "").splitlines()
+    return f"{len(lines)} 行"
 
 
 class ContextPacket:
@@ -44,7 +67,25 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
     packets = []
     q = state.get("user_question", "")
     packets.append(ContextPacket(f"### 用户问题\n{q}", relevance_score=1.0, metadata={"section": "Task"}))
-    packets.append(ContextPacket(f"### 源代码\n```java\n{state.get('source_code', '')}\n```", relevance_score=0.8, metadata={"section": "Evidence"}))
+    # 项目结构概览：仅当 files 非空时注入，token 极小；其他文件由 agent 按需读。
+    project_files = state.get("files") or {}
+    if project_files:
+        overview_lines = [
+            f"- {name} — {_file_type_hint(code)}"
+            for name, code in sorted(project_files.items())
+        ]
+        packets.append(
+            ContextPacket(
+                "### 项目结构\n" + "\n".join(overview_lines)
+                + "\n\n需要某个文件内容时，用 fetch_execution_context 的 file 参数读取；默认读主入口。",
+                relevance_score=0.75,
+                metadata={"section": "Evidence"},
+            )
+        )
+    # 源代码仅当读取工具已暂存 fetched_context.source_code 时注入，避免无条件强制填充整段代码。
+    # 整体代码由 agent 通过 fetch_execution_context 工具按需读取。
+    if (state.get("fetched_context") or {}).get("source_code"):
+        packets.append(ContextPacket(f"### 源代码\n```java\n{state.get('source_code', '')}\n```", relevance_score=0.8, metadata={"section": "Evidence"}))
     for chunk in state.get("retrieved_chunks") or []:
         packets.append(
             ContextPacket(f"[{chunk['source']}] {chunk['content'][:300]}", relevance_score=float(chunk.get("score", 0.5)), metadata={"section": "Evidence", "source": chunk["source"]})
@@ -76,10 +117,12 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
             if state.get("has_steps")
             else "- 总步骤数: 未提供（步骤数据缺失）"
         )
+        current_step_file = state.get("current_step_file", "")
         packets.append(
             ContextPacket(
                 f"### 当前执行位置\n"
                 f"- 当前步骤索引: {index}（展示为第 {display_index} 步）\n"
+                f"- 当前步所在文件: {current_step_file or '未提供'}\n"
                 f"- 当前行号: {state.get('current_line', '')}\n"
                 f"{total_steps_text}",
                 relevance_score=0.9,
@@ -88,7 +131,12 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
         )
     for m in memories or []:
         packets.append(
-            ContextPacket(m.get("content", ""), timestamp=float(m.get("created_at", time.time())), relevance_score=0.5 + float(m.get("importance", 0.5)) * 0.4, metadata={"section": "Memory"})
+            ContextPacket(
+                m.get("content", ""),
+                timestamp=float(m.get("created_at", time.time())),
+                relevance_score=memory_relevance(m.get("content", ""), float(m.get("importance", 0.5)), q),
+                metadata={"section": "Memory"},
+            )
         )
     for msg in (history or [])[-5:]:
         packets.append(
