@@ -109,6 +109,8 @@ def _parse_json_str(content: str | list) -> dict:
 
 def _parse_json_dict(data: dict) -> dict:
     """从已解析的 dict 中提取字段，返回状态更新."""
+    from tools.fetch_execution_context import normalize_files
+
     source_code = data.get("source_code", "")
     steps = data.get("steps", [])
     current_step_index = data.get("current_step_index", 0)
@@ -119,11 +121,15 @@ def _parse_json_dict(data: dict) -> dict:
     compile_error = data.get("compile_error", "")
     intent = data.get("intent", "")
     algorithm_tags = data.get("algorithm_tags") or []
+    files = normalize_files(data.get("files"))
+    entry_file = str(data.get("entry_file") or "")
 
-    # 提取当前步骤的变量快照
+    # 提取当前步骤的变量快照 + 当前步所在文件
     current_variables = {}
+    current_step_file = ""
     if steps and isinstance(steps, list) and 0 <= current_step_index < len(steps):
         current_variables = steps[current_step_index].get("variables", {})
+        current_step_file = steps[current_step_index].get("file", "") or ""
 
     return {
         "source_code": source_code,
@@ -145,6 +151,9 @@ def _parse_json_dict(data: dict) -> dict:
             else conservative_intent(user_question, compile_error)
         ),
         "algorithm_tags": algorithm_tags,
+        "files": files,
+        "entry_file": entry_file,
+        "current_step_file": current_step_file,
         "fallback_reason": "",
         "request_started_at": time.time(),
     }
@@ -412,11 +421,8 @@ def build_final(state: JavaTutorState) -> dict:
     answer = _strip_leaked_json(answer)
 
     run_id = state.get("run_id", "")
-    # fetch_execution_context 是确定性 graph 节点（非 LLM 工具调用），其调用不进入主 Agent 的
-    # tool_calls。这里主动记录，让决策痕迹里能看到这次拉取发生了。
+    # fetch_execution_context 已作为主 Agent 工具循环的 LLM 工具调用真实产生，无需在此补记。
     tool_calls = state.get("tool_calls") or []
-    if run_id:
-        tool_calls = [{"tool": "fetch_execution_context", "args": {"run_id": run_id}}, *tool_calls]
 
     trace = {
         "run_id": run_id,
@@ -485,7 +491,7 @@ def load_session(state: JavaTutorState) -> dict:
     try:
         from learning.memory import get_memory_store
 
-        return {"memories": get_memory_store().search(session_id, limit=5)}
+        return {"memories": get_memory_store().search(session_id, limit=10)}
     except Exception:
         return {"memories": []}
 

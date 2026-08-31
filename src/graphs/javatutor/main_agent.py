@@ -6,11 +6,10 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
+from tools.fetch_execution_context import fetch_execution_context
 from tools.step_facts import step_facts
 
 MAX_ROUNDS = 3
-
-CONTEXT_UNAVAILABLE_ANSWER = "当前暂时无法获取这次代码运行的执行上下文，请重新运行代码后再提问。"
 
 
 def _resolve_model(model):
@@ -44,19 +43,56 @@ def _parse_tool(raw: str) -> dict | None:
     return data if isinstance(data, dict) and data.get("tool") else None
 
 
+def _handle_fetch(tool_calls, fetched_state_updates, state, args) -> str:
+    """dispatch fetch_execution_context：暂存执行上下文，返回追加到 context 的文本。"""
+    tool_calls.append({"tool": "fetch_execution_context", "args": args})
+    try:
+        result = fetch_execution_context(state, **args)
+    except TypeError as exc:
+        result = {"error": f"fetch_execution_context 参数非法: {exc}", "fetch_context_failed": True}
+    if result.get("error"):
+        return f"\n\n[fetch_execution_context 失败]\n{result['error']}"
+    fetched_ctx = result.get("fetched_context") or {}
+    updates = {
+        "fetched_context": fetched_ctx,
+        "run_id": result.get("run_id", state.get("run_id", "")),
+        "fetch_context_failed": False,
+        "fetch_context_latency_ms": result.get("fetch_context_latency_ms", 0.0),
+        "fetch_context_error": "",
+        "run_context_memory": result.get("run_context_memory"),
+    }
+    for k in (
+        "source_code",
+        "steps",
+        "steps_json",
+        "steps_count",
+        "has_steps",
+        "current_step_index",
+        "current_line",
+        "current_variables",
+        "compile_error",
+        "has_error",
+        "algorithm_tags",
+    ):
+        if k in result:
+            updates[k] = result[k]
+    fetched_state_updates.update(updates)
+    digest = {
+        k: result.get(k)
+        for k in ("file", "steps_count", "current_step_index", "current_line", "algorithm_tags")
+        if k in result
+    }
+    payload = {"stored": True, **digest, "code": result.get("code", "")}
+    return f"\n\n[fetch_execution_context 结果]\n{json.dumps(payload, ensure_ascii=False)}"
+
+
 def main_agent_node(state, model=None) -> dict[str, Any]:
-    if state.get("fetch_context_failed") and not state.get("has_steps"):
-        return {
-            "answer": CONTEXT_UNAVAILABLE_ANSWER,
-            "tool_rounds": 0,
-            "tool_calls": [],
-            "step_memories": [],
-        }
     context = state.get("context_built", "")
     rounds = 0
     answer = ""
     tool_calls = []
     step_memories = []
+    fetched_state_updates = {}
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
@@ -72,7 +108,10 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
         if tool is None:
             answer = resp
             break
-        if tool["tool"] == "step_facts":
+        if tool["tool"] == "fetch_execution_context":
+            args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
+            context += _handle_fetch(tool_calls, fetched_state_updates, state, args)
+        elif tool["tool"] == "step_facts":
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
             tool_calls.append({"tool": "step_facts", "args": args})
             try:
@@ -96,4 +135,10 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
             context += f"\n\n[工具 {tool['tool']} 不可用，请直接回答]"
     if not answer:
         answer = "抱歉，我暂时无法回答这个问题。"
-    return {"answer": answer, "tool_rounds": rounds, "tool_calls": tool_calls, "step_memories": step_memories}
+    return {
+        "answer": answer,
+        "tool_rounds": rounds,
+        "tool_calls": tool_calls,
+        "step_memories": step_memories,
+        **fetched_state_updates,
+    }

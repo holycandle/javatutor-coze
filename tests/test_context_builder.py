@@ -67,3 +67,56 @@ def test_gather_includes_run_context_memory():
     combined = "\n".join(p.content for p in packets)
     assert "运行上下文摘要" in combined
     assert "code_hash" in combined
+
+
+def test_gather_does_not_inject_source_code_without_fetched_context():
+    """无 fetched_context 时不再无条件注入整段源代码，交给 agent 按需读取。"""
+    packets = gather({"user_question": "q", "source_code": "public class A {}"}, history=[], memories=[])
+    assert not any("### 源代码" in p.content for p in packets)
+
+
+def test_gather_injects_position_but_not_code():
+    """有执行位置时注入位置包，但仍不注入整段代码。"""
+    packets = gather(
+        {"user_question": "q", "current_step_index": 1, "current_line": 4, "has_steps": True, "steps_count": 5},
+        history=[],
+        memories=[],
+    )
+    texts = [p.content for p in packets]
+    assert any("### 当前执行位置" in t for t in texts)
+
+
+def test_gather_position_annotates_current_step_file():
+    """当前执行位置包应标注当前步所在文件（定位只认当前步，prompt 已承诺该标注）。"""
+    packets = gather(
+        {"user_question": "q", "current_step_index": 1, "current_line": 4,
+         "current_step_file": "Other.java", "has_steps": True, "steps_count": 5},
+        history=[],
+        memories=[],
+    )
+    pos = next(p.content for p in packets if "### 当前执行位置" in p.content)
+    assert "当前步所在文件: Other.java" in pos
+
+
+def test_gather_injects_project_overview():
+    state = {
+        "user_question": "跨文件关系？",
+        "files": {"A.java": "class A {}", "B.java": "interface B"},
+        "retrieved_chunks": [],
+        "analysis_result": None,
+        "run_context_memory": None,
+    }
+    packets = gather(state)
+    overview = [
+        p
+        for p in packets
+        if p.metadata.get("section") == "Evidence" and p.content.startswith("### 项目结构")
+    ]
+    assert overview, "应注入项目结构概览"
+    assert "A.java" in overview[0].content and "B.java" in overview[0].content
+
+
+def test_gather_without_files_no_overview():
+    state = {"user_question": "q", "files": {}, "retrieved_chunks": []}
+    packets = gather(state)
+    assert not any(p.content.startswith("### 项目结构") for p in packets)
