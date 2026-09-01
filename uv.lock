@@ -276,7 +276,7 @@ wheels = [
 
 [[package]]
 name = "coze-coding-dev-sdk"
-version = "0.5.22"
+version = "0.5.24"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 dependencies = [
     { name = "alembic" },
@@ -308,9 +308,9 @@ dependencies = [
     { name = "supabase" },
     { name = "unidecode" },
 ]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/95/62/bd7f3b88a45cbac1f2be0551221e1661a2c5634cf2ac3dd13260ccc9c54c/coze_coding_dev_sdk-0.5.22.tar.gz", hash = "sha256:4406d98d5260cb75a0818c57343c9d7b4f293992a30f9225f9b789fa5f341828" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/67/4b/ba42472d41482e41a9cf1aa78b35a5acfc42da12824afd46e84c047392b9/coze_coding_dev_sdk-0.5.24.tar.gz", hash = "sha256:0b19507101e1ae11fd0d5273a0f825d9ffcfa16b705eecf70d1a29b75c9106e2" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/1c/13/12174e8ee2b83410aad7c79c3c5b41ad9d3b445a57a307efb7581d0c44ad/coze_coding_dev_sdk-0.5.22-py3-none-any.whl", hash = "sha256:644c2ebc35f23c756140815f3449ae6ad4528fb28562c74b280b45e8e0bb759a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/b3/1a/443c1412a59c99052da118f732bfb22e9adb6f52443b04a718f757826831/coze_coding_dev_sdk-0.5.24-py3-none-any.whl", hash = "sha256:bcb2380f122bc9e0b190b10e1ffd326f52c3ef6deaabdb0e25314c33f9496ef4" },
 ]
 
 [[package]]
