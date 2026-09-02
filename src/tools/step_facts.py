@@ -28,16 +28,19 @@ def _line_text(code: str, line, fallback_line=None) -> str:
     return "(行号超出范围)"
 
 
-def _evidence_source(state, file=None) -> tuple[str, str]:
-    """返回 (file_name, code)。定位只认「当前执行步」所在文件（current_step_file / state.files）。
+def _evidence_source(state, step, file=None) -> tuple[str, str]:
+    """返回 (file_name, code)，供 step_facts 按被查询步行号取代码。
 
-    用户/前端切换到的激活文件（source_code）不参与定位。
-    显式 file 参数优先，其次当前执行步文件，最后回退 source_code。
+    定位优先「被查询步」所在文件（step.file），其次显式 file 参数（agent 主动指定），
+    再次当前执行步文件（current_step_file），最后回退 source_code。
+    用户/前端切换到的激活文件（source_code）不参与定位，避免行号随激活文件漂移。
     """
-    candidate = file or state.get("current_step_file") or ""
     files = state.get("files") or {}
-    if candidate and candidate in files:
-        return candidate, files[candidate]
+    step_file = (step or {}).get("file", "") or ""
+    candidates = [step_file, file or "", state.get("current_step_file", "") or ""]
+    for candidate in candidates:
+        if candidate and candidate in files:
+            return candidate, files[candidate]
     return "", state.get("source_code", "")
 
 
@@ -65,7 +68,7 @@ def step_facts(state, step_index=None, line=None, file=None) -> dict[str, Any]:
             "diff": [],
         }
 
-    file_name, code = _evidence_source(state, file=file)
+    file_name, code = _evidence_source(state, step, file=file)
     evidence = {
         "variables": step.get("variables", {}),
         "heap": step.get("heap", {}),

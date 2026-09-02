@@ -71,7 +71,8 @@ def test_facts_block_includes_step_memories():
     )
     # 当前步快照只在 current_step_index 处，但评审要能核对其余步的证据
     assert "已查询的步骤证据（step_facts）" in facts
-    assert "第 6 步: 第 7 步正在交换 arr[0] 和 arr[1]" in facts
+    # 标签统一为 1-based 展示序并保留 0-based 提示，避免「第 6 步」与「第 7 步」被误判为不同步骤
+    assert "第 7 步（step_index=6）: 第 7 步正在交换 arr[0] 和 arr[1]" in facts
 
 
 def test_facts_block_empty_without_step_memories():
