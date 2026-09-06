@@ -78,19 +78,51 @@ def diff(previous: dict, current: dict) -> dict:
     }
 
 
-def resolve_previous_summary(round_dir: Path) -> dict | None:
-    """解析上一轮 summary.json；首轮（round-n, n<=1）或无上一轮时返回 None。"""
+def _round_key(round_dir: Path) -> tuple | None:
+    """返回用于时间序排序的 (year, month, day, round_n)；目录名不合规时返回 None。
+
+    直接按字符串排序日期会因「2026-9-6 / 2026-10-5」这类非补零月份错序，
+    故解析为整数元组再比较（一次比较即可兼顾日期与轮次）。
+    """
     try:
         n = int(round_dir.name.rsplit("-", 1)[-1])
     except (ValueError, IndexError):
-        n = 1
-    if n <= 1:
         return None
-    prev_path = round_dir.parent / f"round-{n - 1}" / "summary.json"
-    if not prev_path.exists():
+    date_parts = round_dir.parent.name.split("-")
+    if len(date_parts) != 3:
         return None
     try:
-        return json.loads(prev_path.read_text(encoding="utf-8"))
+        y, m, d = (int(p) for p in date_parts)
+    except ValueError:
+        return None
+    return (y, m, d, n)
+
+
+def resolve_previous_summary(round_dir: Path) -> dict | None:
+    """解析上一轮 summary.json；无上一轮时返回 None。
+
+    上一轮 = 按时间序（日期 + round-n）严格早于当前轮次的**最近**一轮：
+    - 同一日期下若有 round-{n-1}，自然命中；
+    - 否则回退到更早日期的最近一轮（支持跨日期对比，如 09-6/round-2 对比 08-17/round-1）。
+    自动排除当前轮次自身的 summary.json（report 可能已写过）。
+    """
+    current_key = _round_key(round_dir)
+    if current_key is None:
+        return None
+    archive = round_dir.parent.parent
+    best_key = None
+    best_path: Path | None = None
+    for summary_path in archive.glob("*/round-*/summary.json"):
+        cand_key = _round_key(summary_path.parent)
+        if cand_key is None or cand_key >= current_key:
+            continue
+        if best_key is None or cand_key > best_key:
+            best_key = cand_key
+            best_path = summary_path
+    if best_path is None:
+        return None
+    try:
+        return json.loads(best_path.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -176,6 +208,19 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
         if key in e2e:
             lines.append(f"| {key} | {e2e[key]} |")
 
+    tool_by_tool = e2e.get("tool_call_by_tool") or {}
+    if tool_by_tool:
+        lines += [
+            "",
+            "## 各工具调用情况",
+            "",
+            "| 工具 | 期望样本 | 实际调用 | 正确 | 准确率 | 误用(未期望却调用) |",
+            "|---|---|---|---|---|---|",
+        ]
+        for t, m in tool_by_tool.items():
+            acc = m["accuracy"] if m["accuracy"] is not None else "-"
+            lines.append(f"| {t} | {m['expected']} | {m['called']} | {m['correct']} | {acc} | {m['unexpected']} |")
+
     lines += ["", "## 与上一轮对比", ""]
     if diff_vs:
         lines += ["| 指标 | diff |", "|---|---|"]
@@ -259,3 +304,64 @@ def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: l
         "avg_token_usage": round(sum(tokens) / len(tokens), 1) if tokens else 0,
         "token_usage_sample_count": len(tokens),
     }
+
+
+def _sample_actual_calls(out: dict | None) -> list[dict]:
+    if not out:
+        return []
+    return (out.get("decision_trace") or {}).get("tool_calls") or []
+
+
+def _tool_call_args(tool_calls: list[dict], tool: str) -> list[str]:
+    """取出某工具的所有调用，归一为 args 的排序 JSON 列表（忽略 result/顺序）。"""
+    return sorted(
+        json.dumps(c.get("args", {}), sort_keys=True) for c in tool_calls if c.get("tool") == tool
+    )
+
+
+def compute_per_tool_metrics(outputs: list[dict], samples: list[dict]) -> dict:
+    """按工具拆分调用情况。工具集合自动从「期望 ∪ 实际」推导，新增工具无需改动此函数。
+
+    对每个工具 t（只统计声明了 expected_tool_calls 的样本）：
+      expected   —— 期望调用 t 的样本数
+      called     —— 实际调用 t 的样本数
+      correct    —— 期望 t 的样本中，t 的实际调用（按 args）与期望调用完全一致
+      accuracy   —— correct/expected（expected==0 时为 None，避免误导）
+      unexpected —— 未期望却实际调用 t 的样本数（误用信号，例如 fetch_execution_context）
+    """
+    by_id = {s["id"]: s for s in samples}
+    outs_by_id = {o.get("id"): o for o in outputs}
+    tools: set[str] = set()
+    for s in samples:
+        for c in (s.get("expected_tool_calls") or []):
+            tools.add(c.get("tool"))
+    for o in outputs:
+        for c in _sample_actual_calls(o):
+            tools.add(c.get("tool"))
+
+    result: dict[str, dict] = {}
+    for t in sorted(tools):
+        expected = correct = called = unexpected = 0
+        for sid, s in by_id.items():
+            exp = s.get("expected_tool_calls")
+            if exp is None:
+                continue  # 未声明期望工具的样本不参与，避免把正常调用误判为误用
+            actual = _sample_actual_calls(outs_by_id.get(sid))
+            norm_act = _tool_call_args(actual, t)
+            exp_t = [c for c in exp if c.get("tool") == t]
+            if norm_act:
+                called += 1
+            if exp_t:
+                expected += 1
+                if norm_act == _tool_call_args(exp, t):
+                    correct += 1
+            elif norm_act:
+                unexpected += 1
+        result[t] = {
+            "expected": expected,
+            "called": called,
+            "correct": correct,
+            "accuracy": round(correct / expected, 4) if expected else None,
+            "unexpected": unexpected,
+        }
+    return result
