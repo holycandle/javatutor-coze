@@ -70,3 +70,40 @@
 2. **`_evidence_source` 多文件改动**（同日早前）：让 `step_facts` 在**多文件**下按被查询步自身 `file` 取行号（而非当前步文件）。对单文件场景无影响（恒回退 `source_code`），属正交的多文件正确性改进，保留；已确认非本 bug 根因。
 3. **真实数据格式差异**：本地用合成的 13 步轨迹验证。若线上真正 trace 的 `step` 字段为 1-based（Instrumenter `counter` 从 1 起），或 `variables` 在若干步缺 `arr`，需以线上真实 `【决策痕迹】JSON` 与 `steps` 复核。若仍复现，请提供一次失败回答末尾的原始 `【决策痕迹】JSON`（非渲染界面）以核对 `tool_calls[].result` 的 `line_text`/`diff`。
 4. **Coze 侧部署**：本修复需重新发布后生效。本地已用全量测试与端到端复现确证代码正确。
+
+## 追加：兜底形态（「抱歉，我暂时无法回答这个问题。」）的根因与修复（同日后续）
+
+上面 0/1-based 标签修复只解决了「评审未通过已修订」这一形态。用户重新部署后仍复现**兜底形态**（18 步/13 步下问「第七步在做什么」，主 Agent 反复 `step_facts`，仅生成 11 token，落下兜底「抱歉，我暂时无法回答这个问题。」）。
+
+### 定位
+
+- `build_facts_block` 标签修复只影响**批评者可见性**，不影响**主 Agent 自己能不能答出来**。所以它不改变兜底形态。
+- 端到端复现已证明 `step_facts(step_index=6)` 返回可信证据；后端 `/chat`（`CozeAIController` → `streamExplain(... request.getSteps() ...)`）**确实传递 steps**；部署代码与源仓库内容一致（忽略 CR）。故非「数据没到模型」，而是**模型拿到证据后不肯作答**。
+- 真正的缺口在 [main_agent.py](src/graphs/javatutor/main_agent.py)：把 `step_facts` 返回值以 `json.dumps(result)` 的**原始嵌套 JSON** 追加进 `context`，且**不带步骤标签**（0-based 值、无「第 N 步」字样）。模型既要解析冗长 JSON（`variables` 与 `stackFrames.locals` 重复、`heap`），又要自行推断证据对应「第几步」。弱模型读「必须先调用 step_facts」→ 反复换 `line` 试探（截图为 `行 0 → 行 0 → 行 7`），3 轮未给正文即落兜底。这也解释了「生成 11 token」。
+
+### 改动
+
+- **`src/graphs/javatutor/main_agent.py`** 新增 `_format_step_facts(args, result)`：把证据渲染成可读文本，并带 1-based 展示序 + 0-based 提示的标签（与 `build_facts_block` 修复口径一致）：
+  ```
+  [step_facts 结果：第 7 步（step_index=6）]
+  - 变量：{"arr": [3, 5, 8], "n": 3, "i": 0, "j": 0, "temp": 5}
+  - 堆：（无堆数据）
+  - 栈帧：[{"method": "main"}]
+  - 输出：`（无输出）`
+  - 行号 9：`arr[j] = arr[j+1];`
+  - 与上一步对比：
+    - arr: [5, 3, 8] → [3, 5, 8]
+  ```
+  模型一眼读出「第 7 步把 arr[0] 与 arr[1] 交换」，不再解析原始 JSON。
+- 追加**重复查询提示**：若已为某 step_index 返回过非错误证据，又再次查询**同一步骤**，则追加「这一步的证据已在上文 'step_facts 结果' 中给出，请直接基于该证据回答，不要重复查询同一步骤。」——打断 `行 0 → 行 0` 式重复试探；查询**不同**步骤仍允许（便于模型对照多步）。
+- 测试：`tests/test_main_agent.py` 新增 `test_format_step_facts_is_clean_labeled_text` 与 `test_main_agent_repeat_same_step_gets_answer_nudge`。
+
+### 验证结果
+
+- `uv run pytest -q` **192 passed**（无回归）。
+- 部署副本 `../projects/src/graphs/javatutor/main_agent.py` 与源仓库内容一致（忽略 CR）。
+
+### 遗留 / 待确认
+
+- 核心不确定点已收敛为「模型行为」：生成 token 极小（11）。若新格式上线后仍复现，需取真实失败回答末尾的原始 `【决策痕迹】JSON` 核对 `tool_calls[].result` 的 `line_text`/`diff`，以及是否仍以同一步骤重复查询。
+- `build_facts_block` 的 0/1-based 修复与本次 `_format_step_facts` 属于两个独立形态（评审拒绝 vs 主 Agent 不答），须同时生效。
