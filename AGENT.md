@@ -69,6 +69,7 @@
 | 多文件项目理解实现 | `docs/devlog/2026-08-30-multifile-whole-project.md` | file 参数激活 + 概览注入 + step_facts 按当前步文件（171 passed） |
 >>>>>>> feat/fetch-execution-context-as-tool
 | 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
+| 非当前步证据标签修复 | `docs/devlog/2026-09-02-step-facts-non-current-step-file.md` | 评审核对证据的 0/1-based 标签错配，单文件查非当前步（190 passed） |
 
 ## 文档规范
 

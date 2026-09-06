@@ -43,6 +43,45 @@ def _parse_tool(raw: str) -> dict | None:
     return data if isinstance(data, dict) and data.get("tool") else None
 
 
+def _format_step_facts(args: dict, result: dict) -> str:
+    """把 step_facts 返回值渲染成主 Agent 可直接读的证据文本（而非让模型解析原始 JSON）。
+
+    工具返回的 step_index 是 0-based；这里统一带出「第 N 步（step_index=x）」标签，
+    避免模型在上下文里把证据误对应到别的步骤。若 evidence 存在但模型仍未作答，
+    该文本也能让模型一眼读出「这一步做了什么」，不再反复试探 step_facts。
+    """
+    if result.get("error"):
+        return f"\n\n[step_facts 结果]\n错误：{result['error']}"
+    idx = args.get("step_index")
+    try:
+        label = f"第 {int(idx) + 1} 步（step_index={int(idx)}）"
+    except (TypeError, ValueError):
+        label = "当前步"
+    ev = result.get("evidence") or {}
+    lines = [f"\n\n[step_facts 结果：{label}]"]
+    lines.append(f"- 变量：{json.dumps(ev.get('variables', {}), ensure_ascii=False)}")
+    heap = ev.get("heap")
+    lines.append(f"- 堆：{json.dumps(heap, ensure_ascii=False) if heap else '（无堆数据）'}")
+    frames = ev.get("stackFrames")
+    lines.append(f"- 栈帧：{json.dumps(frames, ensure_ascii=False) if frames else '（无栈帧）'}")
+    output = ev.get("output")
+    lines.append(f"- 输出：`{output if output is not None else '（无输出）'}`")
+    line = ev.get("line")
+    if line is not None:
+        lines.append(f"- 行号 {line}：`{ev.get('line_text', '')}`")
+    else:
+        lines.append(f"- 行代码：`{ev.get('line_text', '')}`")
+    diff = result.get("diff") or []
+    if diff:
+        lines.append("- 与上一步对比：")
+        for item in diff:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('key', '?')}: {item.get('before', '?')} → {item.get('after', '?')}")
+            else:
+                lines.append(f"  - {item}")
+    return "\n".join(lines)
+
+
 def _handle_fetch(tool_calls, fetched_state_updates, state, args) -> str:
     """dispatch fetch_execution_context：暂存执行上下文，返回追加到 context 的文本。"""
     tool_calls.append({"tool": "fetch_execution_context", "args": args})
@@ -93,6 +132,7 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     tool_calls = []
     step_memories = []
     fetched_state_updates = {}
+    served_step_indices: set = set()
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
@@ -131,7 +171,20 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
                     }
                 )
                 step_memories = step_memories[-5:]
-            context += f"\n\n[step_facts 结果]\n{json.dumps(result, ensure_ascii=False)}"
+            if not result.get("error") and args.get("step_index") is not None:
+                idx_key = args.get("step_index")
+                if idx_key in served_step_indices:
+                    # 同一步骤再次被查询：证据已在上文给出，明确要求直接作答，避免反复试探。
+                    context += _format_step_facts(args, result)
+                    context += (
+                        "\n\n[提示] 这一步的证据已在上文「step_facts 结果」中给出，"
+                        "请直接基于该证据回答用户问题，不要重复查询同一步骤。"
+                    )
+                else:
+                    served_step_indices.add(idx_key)
+                    context += _format_step_facts(args, result)
+            else:
+                context += _format_step_facts(args, result)
         else:
             # 未知工具：提示不可用，继续让主 Agent 直接回答，而不是把 JSON 当最终答案
             tool_calls.append({"tool": tool["tool"], "args": tool.get("args", {})})
