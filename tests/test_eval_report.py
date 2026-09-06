@@ -66,7 +66,6 @@ def test_summarize_merges_extended():
 
 def test_compute_extended_metrics():
     from eval.runner.report import compute_extended_metrics
-
     outputs = [
         {
             "id": "q01",
@@ -206,3 +205,157 @@ def test_resolve_previous_summary_missing_prev_returns_none(tmp_path):
     round_dir = tmp_path / "2026-08-17" / "round-3"
     round_dir.mkdir(parents=True, exist_ok=True)
     assert resolve_previous_summary(round_dir) is None
+
+
+def test_resolve_previous_summary_cross_date_falls_back(tmp_path):
+    """跨日期对比：当前轮同日期无 round-{n-1} 时，回退到更早日期的最近一轮。"""
+    prev = tmp_path / "2026-08-17" / "round-1"
+    prev.mkdir(parents=True, exist_ok=True)
+    (prev / "summary.json").write_text('{"e2e": {"avg_score": 3.5}}', encoding="utf-8")
+    cur = tmp_path / "2026-09-6" / "round-2"
+    cur.mkdir(parents=True, exist_ok=True)
+    (cur / "summary.json").write_text('{"e2e": {"avg_score": 4.0}}', encoding="utf-8")
+    # 应命中更早日期 round-1，而不是「无上一轮」；且排除当前轮自身的 summary
+    result = resolve_previous_summary(cur)
+    assert result == {"e2e": {"avg_score": 3.5}}
+
+
+def test_resolve_previous_summary_skips_future_rounds(tmp_path):
+    """后面的轮次（如 round-3）不作为上一轮；只取严格早于当前轮次的最近一轮。"""
+    p1 = tmp_path / "2026-08-17" / "round-1"
+    p1.mkdir(parents=True, exist_ok=True)
+    (p1 / "summary.json").write_text('{"e2e": {"avg_score": 3.5}}', encoding="utf-8")
+    p3 = tmp_path / "2026-09-6" / "round-3"
+    p3.mkdir(parents=True, exist_ok=True)
+    (p3 / "summary.json").write_text('{"e2e": {"avg_score": 5.0}}', encoding="utf-8")
+    cur = tmp_path / "2026-09-6" / "round-2"
+    cur.mkdir(parents=True, exist_ok=True)
+    result = resolve_previous_summary(cur)
+    assert result == {"e2e": {"avg_score": 3.5}}
+
+
+# ── 各工具调用情况（compute_per_tool_metrics） ────────────────────────────────
+
+
+def test_per_tool_metrics_exact_match_basic():
+    from eval.runner.report import compute_per_tool_metrics
+
+    samples = [
+        {"id": "q01", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]},
+        {"id": "q02", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]},
+    ]
+    outputs = [
+        {"id": "q01", "decision_trace": {"tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]}},
+        {"id": "q02", "decision_trace": {"tool_calls": [{"tool": "step_facts", "args": {"step_index": 2}}]}},
+    ]
+    m = compute_per_tool_metrics(outputs, samples)
+    assert m["step_facts"]["expected"] == 2
+    assert m["step_facts"]["called"] == 2
+    assert m["step_facts"]["correct"] == 1
+    assert m["step_facts"]["accuracy"] == 0.5
+    assert m["step_facts"]["unexpected"] == 0
+
+
+def test_per_tool_metrics_unexpected_tool_surfaces():
+    """未期望却实际调用的工具（如 fetch_execution_context）应作为误用浮出，而非被总率掩盖。"""
+    from eval.runner.report import compute_per_tool_metrics
+
+    samples = [
+        {"id": "q01", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]},
+    ]
+    outputs = [
+        {
+            "id": "q01",
+            "decision_trace": {
+                "tool_calls": [
+                    {"tool": "step_facts", "args": {"step_index": 1}},
+                    {"tool": "fetch_execution_context", "args": {"run_id": "r1"}},
+                ]
+            },
+        }
+    ]
+    m = compute_per_tool_metrics(outputs, samples)
+    # fetch_execution_context 出现在结果里（自动推导），expected=0 但被调用 → 误用信号
+    assert m["fetch_execution_context"]["expected"] == 0
+    assert m["fetch_execution_context"]["called"] == 1
+    assert m["fetch_execution_context"]["accuracy"] is None
+    assert m["fetch_execution_context"]["unexpected"] == 1
+    # step_facts 仍按精确匹配计
+    assert m["step_facts"]["correct"] == 1
+
+
+def test_per_tool_metrics_iterates_by_id_not_order():
+    """样本与输出按 id 关联，不应依赖其顺序。输出缺 decision_trace 时按未调用计。"""
+    from eval.runner.report import compute_per_tool_metrics
+
+    samples = [
+        {"id": "b", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]},
+        {"id": "a", "expected_tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]},
+    ]
+    outputs = [
+        {"id": "a", "decision_trace": {"tool_calls": [{"tool": "step_facts", "args": {"step_index": 1}}]}},
+        {"id": "b"},  # 无 decision_trace → 视为未调用
+    ]
+    m = compute_per_tool_metrics(outputs, samples)
+    assert m["step_facts"]["correct"] == 1
+    assert m["step_facts"]["called"] == 1
+    assert m["step_facts"]["expected"] == 2
+
+
+def test_per_tool_metrics_fetch_first_sequence_counted():
+    """新标准：需要执行证据的样本应先 fetch_execution_context 再 step_facts；
+    工具调用顺序不影响命中，fetch 不再被误判为「误用」。"""
+    from eval.runner.report import compute_per_tool_metrics
+
+    samples = [
+        {
+            "id": "q01",
+            "expected_tool_calls": [
+                {"tool": "fetch_execution_context", "args": {}},
+                {"tool": "step_facts", "args": {"step_index": 1, "line": 4}},
+            ],
+        },
+    ]
+    outputs = [
+        {
+            "id": "q01",
+            "decision_trace": {
+                "tool_calls": [
+                    {"tool": "step_facts", "args": {"step_index": 1, "line": 4}},  # 顺序与期望不同
+                    {"tool": "fetch_execution_context", "args": {}},
+                ]
+            },
+        },
+    ]
+    m = compute_per_tool_metrics(outputs, samples)
+    assert m["fetch_execution_context"]["expected"] == 1
+    assert m["fetch_execution_context"]["called"] == 1
+    assert m["fetch_execution_context"]["correct"] == 1
+    assert m["fetch_execution_context"]["accuracy"] == 1.0
+    assert m["fetch_execution_context"]["unexpected"] == 0
+    assert m["step_facts"]["correct"] == 1
+    assert m["step_facts"]["unexpected"] == 0
+
+
+def test_per_tool_metrics_missing_fetch_surfaces_as_low_accuracy():
+    """期望 fetch 却没调用：fetch 准确率下降（而非误用），暴露「先读上下文」缺口。"""
+    from eval.runner.report import compute_per_tool_metrics
+
+    samples = [
+        {
+            "id": "q01",
+            "expected_tool_calls": [
+                {"tool": "fetch_execution_context", "args": {}},
+                {"tool": "step_facts", "args": {"step_index": 1, "line": 4}},
+            ],
+        },
+    ]
+    outputs = [
+        {"id": "q01", "decision_trace": {"tool_calls": [{"tool": "step_facts", "args": {"step_index": 1, "line": 4}}]}},
+    ]
+    m = compute_per_tool_metrics(outputs, samples)
+    assert m["fetch_execution_context"]["expected"] == 1
+    assert m["fetch_execution_context"]["called"] == 0
+    assert m["fetch_execution_context"]["accuracy"] == 0.0
+    assert m["fetch_execution_context"]["unexpected"] == 0
+    assert m["step_facts"]["correct"] == 1

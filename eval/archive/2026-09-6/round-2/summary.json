@@ -1,0 +1,43 @@
+{
+  "e2e": {
+    "avg_score": 3.0,
+    "grounding_avg": 2.3226,
+    "total": 31,
+    "correct": 7,
+    "partially_correct": 19,
+    "incorrect": 5,
+    "judge_fallback_rate": 0.0,
+    "empty_output_rate": 0.0,
+    "tool_call_accuracy": 0.5806,
+    "task_success_rate": 0.0968,
+    "avg_latency": 17.044,
+    "avg_token_usage": 2960.5,
+    "token_usage_sample_count": 29,
+    "grounding_verify_applicable": 17,
+    "grounding_verify_checked": 51,
+    "grounding_verify_violations": 1,
+    "grounding_verify_accuracy": 0.9412,
+    "tool_call_by_tool": {
+      "fetch_execution_context": {
+        "expected": 16,
+        "called": 4,
+        "correct": 4,
+        "accuracy": 0.25,
+        "unexpected": 0
+      },
+      "step_facts": {
+        "expected": 16,
+        "called": 15,
+        "correct": 15,
+        "accuracy": 0.9375,
+        "unexpected": 0
+      }
+    }
+  },
+  "component": {},
+  "diff_vs_previous": {
+    "avg_score": -0.5172,
+    "grounding_avg": -0.7808,
+    "component_pass_rate": 0
+  }
+}
