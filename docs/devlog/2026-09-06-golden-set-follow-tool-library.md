@@ -76,13 +76,43 @@ step_facts                expected=16  called=15 correct=15 accuracy=0.9375 unex
 
 `report` 已用新 gold 重新生成：`eval/archive/2026-09-6/round-2/summary.json`、`report.md`。
 
-## 6. 遗留问题（非本修复范围，需单独处理）
+## 6. 补充知识库条目（q14 ArrayList）
 
-1. **q14（ArrayList）无 KB chunk**：`java_std.json` 没有 ArrayList 条目，`知识库: ArrayList` 永不命中。需向知识库补一个 ArrayList 条目（或改样本）。
-2. **round-2 `decision_trace.sources` 全空**：`build_final` 从 `state.retrieved_chunks` 取来源，但 round-2 每条都为空，说明部署链路里 RAG 检索结果没进 state（或未记录到 trace）。在来源未记录前，`expected_sources` 只是标签修复，`compute_retrieval_metrics`（MRR/hit@k）无法在 round-2 上得到有效值。
+`java_std.json` 原本没有 ArrayList 条目，导致 q14 的 `知识库: ArrayList` 永不命中。已在 `PriorityQueue` 之后补 3 个条目：
 
-## 7. 涉及文件
+- `ArrayList.get`（O(1) 随机访问，直接对应 q14「ArrayList 的 get 复杂度」）
+- `ArrayList.add`（摊还 O(1)）
+- `ArrayList.set`（O(1)）
 
-- `eval/samples/golden_set.jsonl`（期望工具调用 + RAG 标签）
-- `tests/test_eval_report.py`（新增 `test_per_tool_metrics_fetch_first_sequence_counted`、`test_per_tool_metrics_missing_fetch_surfaces_as_low_accuracy`）
+并把 q14 的 `expected_sources` 修正为 `知识库: ArrayList.get`（与 `seed_assets` 的 `知识库: {title}` 标签规则一致）。校验后所有 `expected_sources` 均为合法 chunk 标签。
+
+## 7. round-2 `sources` 全空的根因分析与修复
+
+### 现象
+- 每条 `decision_trace.sources = []`，但 `rag_degraded = False`。
+- 矛盾点：RAG 正常但无相关结果 ≠ 有降级标志，二者都对不上。
+
+### 根因（已确认）
+1. `retrieve_knowledge`（[nodes.py](../../src/graphs/javatutor/nodes.py#L325-L334)）只在 `search_chunks` **抛异常**时置 `rag_degraded=True`。
+2. 但 `search_chunks`（[knowledge.py](../../src/learning/knowledge.py#L132-L151)）自己用 `try/except` **吞掉了 Coze EmbeddingClient 与 pgvector 的所有异常并返回 `[]`**，从不向外抛。
+3. 因此 `retrieve_knowledge` 的 except（降级）是**死代码**——`rag_degraded` 永远 False，真实失败被静默掩盖。
+4. 本机验证：`.env` 无 `PGDATABASE_URL`，`search_chunks("...")` 返回 0 条且不抛；`retrieve_knowledge` 输出 `rag_degraded=False`。
+
+即：**RAG 后端（Coze embedding + pgvector 数据库）在部署链路里不可达/未配置，`search_chunks` 返回空，但降级标志从未触发，故 `sources` 全空且 `rag_degraded=False`。**
+
+> 另：q13 的 `intent` 被判为 `data_query`（实为概念题），可能把概念样本引向 step_facts/fetch 而非 RAG，属独立的意图分类偏差，叠加干扰了 RAG 可见性。
+
+### 修复
+让 `search_chunks` 在 embedding/查询后端失败时**向上抛**，交给 `retrieve_knowledge` 的 except 置 `rag_degraded=True`，失败即写进决策痕迹（`rag_degraded`），不再静默。改动 `src/learning/knowledge.py`，并加测试 `test_search_chunks_propagates_backend_error`。
+
+本机验证（无 DB）：`retrieve_knowledge` 现在输出 `rag_degraded=True, retrieved_chunks=[]`。
+
+> 运行时仍需在部署环境配置 `PGDATABASE_URL`（或保证 Coze EmbeddingClient 可用），否则 RAG 依然拿不到数据——但至少现在会明确降级，而不是无声返回空。
+
+## 8. 涉及文件
+
+- `eval/samples/golden_set.jsonl`（期望工具调用 + RAG 标签 + q14 标签）
+- `assets/knowledge/java_std.json`（补 ArrayList.get/add/set 3 条目）
+- `src/learning/knowledge.py`（`search_chunks` 失败向上抛，让降级信号可见）
+- `tests/test_eval_report.py`、`tests/test_knowledge.py`（新增测试）
 - `eval/archive/2026-09-6/round-2/summary.json`、`report.md`（重新生成）

@@ -136,13 +136,16 @@ def search_chunks(
     embedder: Callable = embed_texts,
     fetcher: Callable = _fetch_similar,
 ) -> list[dict[str, Any]]:
+    """检索知识分块；embedding / 查询失败时向调用方抛出异常（而非吞掉）。
+
+    之前内部 try/except 吞掉了 Coze EmbeddingClient 与 pgvector 的后端失败并返回 [],
+    导致 retrieve_knowledge 的 except 分支（rag_degraded=True）永远不触发，
+    RAG 故障被静默掩盖。改为向上抛出，让 graph 节点能正确置降级标志并记录到决策痕迹。
+    """
     if not query.strip():
         return []
-    try:
-        vector = embedder([query])[0]
-        rows = fetcher(vector, top_k)
-    except Exception:
-        return []
+    vector = embedder([query])[0]
+    rows = fetcher(vector, top_k)
     return [
         {"source": row[0], "chunk_index": row[1], "content": row[2], "score": round(float(row[3]), 4)}
         for row in rows
