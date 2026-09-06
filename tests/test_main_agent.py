@@ -2,7 +2,50 @@
 
 from langchain_core.messages import AIMessage
 
-from graphs.javatutor.main_agent import main_agent_node
+from graphs.javatutor.main_agent import _format_step_facts, main_agent_node
+
+
+def test_format_step_facts_is_clean_labeled_text():
+    """step_facts 结果应渲染为可读文本并用 1-based 步骤标签，避免模型解析原始 JSON。"""
+    result = {
+        "error": "",
+        "evidence": {
+            "variables": {"arr": [3, 5, 8], "n": 3, "i": 0, "j": 0, "temp": 5},
+            "heap": {},
+            "stackFrames": [{"method": "main"}],
+            "output": None,
+            "line": 9,
+            "line_text": "arr[j] = arr[j+1];",
+        },
+        "diff": [{"key": "arr", "before": [5, 3, 8], "after": [3, 5, 8]}],
+    }
+    text = _format_step_facts({"step_index": 6}, result)
+    # 关键：带 0-based 提示的 1-based 标签，与用户/回答的「第 7 步」对齐
+    assert "第 7 步（step_index=6）" in text
+    assert "变量" in text
+    assert "[3, 5, 8]" in text
+    assert "arr[j] = arr[j+1];" in text
+    # 明确给出 diff，模型可直接读「这一步做了什么」，不必再反复试探
+    assert "arr" in text and "[5, 3, 8] → [3, 5, 8]" in text
+
+
+def test_main_agent_repeat_same_step_gets_answer_nudge():
+    """同一步骤被再次查询时，应向模型注入「请直接作答」提示，打断重复试探。"""
+    model = RecordingModel(
+        [
+            '{"tool": "step_facts", "args": {"step_index": 1}}',
+            '{"tool": "step_facts", "args": {"step_index": 1}}',
+            "根据第 2 步，x 变成了 2",
+        ]
+    )
+    out = main_agent_node(STATE, model=model)
+    assert out["tool_rounds"] == 3
+    # 第二次查询同一步骤后，提示在下一轮消息中出现（打断重复试探）
+    last_human = model.seen[-1][-1].content
+    assert "不要重复查询同一步骤" in last_human
+    # 证据文本应带 1-based 标签
+    assert "第 2 步（step_index=1）" in last_human
+    assert "x 变成了 2" in out["answer"]
 
 
 class SequenceModel:
@@ -31,6 +74,18 @@ STATE = {
     ],
     "current_step_index": 1,
 }
+
+
+class RecordingModel:
+    """记录每次收到的 messages（用于断言 model 上下文内容）。"""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.seen = []
+
+    def invoke(self, messages):
+        self.seen.append(messages)
+        return AIMessage(content=self.responses.pop(0))
 
 
 def test_main_agent_calls_step_facts_then_answers():
