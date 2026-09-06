@@ -105,6 +105,7 @@ def cmd_judge(args) -> int:
 def cmd_report(args) -> int:
     from eval.runner.grounding import compute_grounding_verify
     from eval.runner.report import (
+        collect_changes_since,
         compute_extended_metrics,
         compute_per_tool_metrics,
         diff,
@@ -127,6 +128,7 @@ def cmd_report(args) -> int:
     previous = resolve_previous_summary(args.round_dir)
     if previous:
         summary["diff_vs_previous"] = diff(previous, summary)
+    summary["changes"] = collect_changes_since(args.round_dir)
     write_summary(args.round_dir / "summary.json", summary)
     report_path = write_report(
         args.round_dir,

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from eval.runner.report import (
+    collect_changes_since,
     diff,
     resolve_commit,
     resolve_model,
@@ -232,6 +233,93 @@ def test_resolve_previous_summary_skips_future_rounds(tmp_path):
     cur.mkdir(parents=True, exist_ok=True)
     result = resolve_previous_summary(cur)
     assert result == {"e2e": {"avg_score": 3.5}}
+
+
+# ── Agent 更新与变化（collect_changes_since，来自 docs/devlog/） ───────────────
+
+
+def test_collect_changes_since_filters_by_prev_round(tmp_path, monkeypatch):
+    """只收上一轮日期之后、当前轮日期之前的 devlog；评测关键词归 eval_changes。"""
+    from eval.runner import report as report_mod
+
+    monkeypatch.setattr(report_mod, "ROOT", tmp_path)
+    devlog = tmp_path / "docs" / "devlog"
+    devlog.mkdir(parents=True, exist_ok=True)
+    # 上一轮 = 2026-08-17 round-1；当前轮 = 2026-09-6 round-2
+    (devlog / "2026-08-17-some-agent-change.md").write_text("# 08-17 旧改动\n", encoding="utf-8")  # 区间前，排除
+    (devlog / "2026-08-30-fetch-execution-context-as-tool.md").write_text("# fetch 工具化\n", encoding="utf-8")
+    (devlog / "2026-09-06-golden-set-follow-tool-library.md").write_text("# 金样本校准\n", encoding="utf-8")
+    cur = tmp_path / "eval" / "archive" / "2026-09-6" / "round-2"
+    prev = tmp_path / "eval" / "archive" / "2026-08-17" / "round-1"
+    prev.mkdir(parents=True, exist_ok=True)
+    (prev / "summary.json").write_text('{"e2e": {}}', encoding="utf-8")
+    cur.mkdir(parents=True, exist_ok=True)
+
+    result = collect_changes_since(cur)
+    assert result["since"] == "2026-08-17 round-1"
+    titles = [t.split(" ", 1)[1] for t in result["agent_changes"]]
+    assert "fetch 工具化" in titles
+    assert "08-17 旧改动" not in titles
+    assert any("金样本校准" in t for t in result["eval_changes"])
+
+
+def test_collect_changes_since_no_previous_lists_all(tmp_path, monkeypatch):
+    """无上一轮时列出项目开始以来的全部日志（首轮看到完整变更史）。"""
+    from eval.runner import report as report_mod
+
+    monkeypatch.setattr(report_mod, "ROOT", tmp_path)
+    devlog = tmp_path / "docs" / "devlog"
+    devlog.mkdir(parents=True, exist_ok=True)
+    (devlog / "2026-08-07-phase1.md").write_text("# Phase 1\n", encoding="utf-8")
+    (devlog / "2026-08-30-fetch-execution-context-as-tool.md").write_text("# fetch 工具化\n", encoding="utf-8")
+    cur = tmp_path / "eval" / "archive" / "2026-09-6" / "round-2"
+    cur.mkdir(parents=True, exist_ok=True)
+
+    result = collect_changes_since(cur)
+    assert result["since"] is None
+    assert len(result["agent_changes"]) + len(result["eval_changes"]) == 2
+
+
+def test_collect_changes_since_classifies_by_filename_keyword(tmp_path, monkeypatch):
+    """文件名关键词粗分：eval/judge/golden/grounding 等归评测侧，其余归 Agent 侧。"""
+    from eval.runner import report as report_mod
+
+    monkeypatch.setattr(report_mod, "ROOT", tmp_path)
+    devlog = tmp_path / "docs" / "devlog"
+    devlog.mkdir(parents=True, exist_ok=True)
+    (devlog / "2026-08-24-grounding-verifier.md").write_text("# Grounding 核对器\n", encoding="utf-8")  # grounding → 评测侧
+    (devlog / "2026-08-25-knowledge-base-correction.md").write_text("# 知识库核对\n", encoding="utf-8")  # 语料变更 → Agent 侧
+    (devlog / "2026-08-29-memory-retrieval.md").write_text("# 记忆检索\n", encoding="utf-8")  # Agent 侧
+    cur = tmp_path / "eval" / "archive" / "2026-09-6" / "round-2"
+    cur.mkdir(parents=True, exist_ok=True)
+
+    result = collect_changes_since(cur)
+    assert any("Grounding 核对器" in t for t in result["eval_changes"])
+    assert any("知识库核对" in t for t in result["agent_changes"])
+    assert any("记忆检索" in t for t in result["agent_changes"])
+
+
+def test_write_report_renders_changes_section(tmp_path):
+    """summary 带 changes 时，report.md 渲染「Agent 更新与变化」节。"""
+    round_dir = _make_round(tmp_path)
+    summary = {
+        "e2e": {"avg_score": 4.0, "total": 1},
+        "component": {},
+        "diff_vs_previous": {},
+        "changes": {
+            "since": "2026-08-17 round-1",
+            "agent_changes": ["2026-08-30 fetch_execution_context 工具化"],
+            "eval_changes": ["2026-09-06 金样本校准"],
+        },
+    }
+    judged = [{"id": "q01", "score": 4, "judgement": "correct", "scores": {"grounding": 4}, "answer": "A"}]
+    write_report(round_dir, summary, judged, [], [])
+    md = (round_dir / "report.md").read_text(encoding="utf-8")
+    assert "Agent 更新与变化" in md
+    assert "自 2026-08-17 round-1 以来" in md
+    assert "fetch_execution_context 工具化" in md
+    assert "金样本校准" in md
+    assert "Agent 侧" in md and "评测侧" in md
 
 
 # ── 各工具调用情况（compute_per_tool_metrics） ────────────────────────────────
