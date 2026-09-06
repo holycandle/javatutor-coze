@@ -64,6 +64,8 @@ def _db_url() -> str:
 def ensure_schema(url: str | None = None) -> None:
     with psycopg.connect(url or _db_url(), autocommit=True) as conn:
         with conn.cursor() as cur:
+            # 新库需先启用 pgvector 扩展，否则建表时报 type "vector" does not exist
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS knowledge_chunks ("
                 "id BIGSERIAL PRIMARY KEY, source TEXT NOT NULL, chunk_index INT NOT NULL, "
