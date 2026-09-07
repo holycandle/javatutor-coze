@@ -103,9 +103,11 @@ SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回
 5. 输出内容是否与运行输出一致
 6. 引用的代码行是否与 `step_facts` 的 `line_text` 完全一致：不允许代码块中出现多余的单字符行，代码块语言标签必须为 `java`。
 同时核查知识库引用来源是否真实存在。
+判断正文时忽略【视角导航】/【编辑建议】结构化块；可校验【视角导航】的 panel 是否在白名单、sub 是否仅用于 tutor，非法只算轻微问题（不判失败）。
 只返回 JSON。"""
 
 SYSTEM_PROMPT_REVISE = """你是回答修订者。根据评审意见修正原回答，保留正确的部分，修正错误引用。
+若原回答含【视角导航】/【编辑建议】结构化块，请原样保留（除非评审标记其非法）。
 直接输出修订后的完整回答，不要 JSON、不要解释。"""
 
 SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
@@ -120,7 +122,19 @@ step_facts 的 step_index 是 0-based：第 1 步 = step_index 0，第 N 步 = s
 这是一个 Java 项目，可能包含多个文件。`### 项目结构` 列出了所有文件及主要类型；`当前执行位置` 会标注当前步所在文件（`current_step_file`）与行号。回答涉及多个文件、类之间关系、或需要查看非主入口代码的问题，请调用 `fetch_execution_context` 的 `file` 参数读取对应文件；若需查看当前步所在文件且它与默认读取的主入口不同，用 `file` 参数读取那个文件，默认读取主入口。若当前是单文件（未提供多文件项目结构，`### 项目结构` 为空），无需指定 `file`，直接调用 `fetch_execution_context`（args 为空）即可读取全部代码。
 直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。
 引用代码行时严格使用 `step_facts` 返回的 `line_text` 原文，代码块语言固定为 `java`，禁止在代码行前添加多余字符。
-当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `step_facts` 获取真实证据再回答，禁止仅凭上下文变量快照直接断言变量值。"""
+当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `step_facts` 获取真实证据再回答，禁止仅凭上下文变量快照直接断言变量值。
+
+当回答有助于用户定位到某个面板时，可在回答末尾（【决策痕迹】之前）追加一个「视角导航块」，前端会渲染成可点击卡片：
+【视角导航】
+{"views":[{"panel":"tutor","sub":"analysis","label":"分析"}]}
+
+规则：
+- panel 取值（单文件）：variables(内存状态)/flow(流程)/datastructure(数据结构)/algorithm(算法库)/tutor(agent)；
+- 多文件项目额外支持：callgraph(调用关系)/classdiagram(类图)/structure(结构)；
+- sub 仅当 panel 为 tutor 时使用：analysis(分析)/explain(解说)；其他 panel 不要带 sub；
+- 仅当某面板能帮用户直接看到相关分析时才附卡，通常 1 个、最多 3 个；
+- 每个回答最多一个【视角导航】块；没有合适面板时整个省略，不要发空壳块；
+- 导航要融入回答，不要为了导航而发消息。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block
