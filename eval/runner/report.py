@@ -1,6 +1,7 @@
 """评估汇总与前后对比。"""
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -78,19 +79,127 @@ def diff(previous: dict, current: dict) -> dict:
     }
 
 
-def resolve_previous_summary(round_dir: Path) -> dict | None:
-    """解析上一轮 summary.json；首轮（round-n, n<=1）或无上一轮时返回 None。"""
+def _round_key(round_dir: Path) -> tuple | None:
+    """返回用于时间序排序的 (year, month, day, round_n)；目录名不合规时返回 None。
+
+    直接按字符串排序日期会因「2026-9-6 / 2026-10-5」这类非补零月份错序，
+    故解析为整数元组再比较（一次比较即可兼顾日期与轮次）。
+    """
     try:
         n = int(round_dir.name.rsplit("-", 1)[-1])
     except (ValueError, IndexError):
-        n = 1
-    if n <= 1:
         return None
-    prev_path = round_dir.parent / f"round-{n - 1}" / "summary.json"
-    if not prev_path.exists():
+    date_parts = round_dir.parent.name.split("-")
+    if len(date_parts) != 3:
         return None
     try:
-        return json.loads(prev_path.read_text(encoding="utf-8"))
+        y, m, d = (int(p) for p in date_parts)
+    except ValueError:
+        return None
+    return (y, m, d, n)
+
+
+def _iter_round_dirs(archive: Path):
+    """按时间序枚举 archive 下所有 round 目录。"""
+    dirs = [d for d in archive.glob("*/round-*") if _round_key(d) is not None]
+    return sorted(dirs, key=_round_key)
+
+
+def collect_changes_since(round_dir: Path) -> dict:
+    """收集「上一轮 → 本轮」之间 docs/devlog/ 记录的 agent/评测变更，供 report 呈现。
+
+    区间 = 上一轮日期（严格大于其日期部分）到当前轮日期。无上一轮时列出项目开始以来的
+    全部日志（首轮本就该看到完整变更史）。分类按文件名关键词粗分 Agent 侧 / 评测侧。
+    """
+    archive = round_dir.parent.parent
+    current_key = _round_key(round_dir)
+    if current_key is None:
+        return {"since": None, "agent_changes": [], "eval_changes": []}
+    prev_dir = None
+    best_key = None
+    for d in _iter_round_dirs(archive):
+        k = _round_key(d)
+        if k is None or k >= current_key:
+            continue
+        if best_key is None or k > best_key:
+            best_key = k
+            prev_dir = d
+    prev_key = best_key
+
+    # 粗分依据文件名 + 标题关键词；"eval" 用词边界匹配，避免误命中 "retrieval" 里的子串
+    def _is_eval_log(name: str, title: str) -> bool:
+        if re.search(r"(?:^|[-_])eval(?:[-_]|$)", name):
+            return True
+        if any(k in name for k in ("judge", "golden", "sample", "grounding", "知识库")):
+            return True
+        return any(k in title for k in ("评估", "评测", "Judge", "golden"))
+
+    agent_changes: list[str] = []
+    eval_changes: list[str] = []
+    for log in sorted((ROOT / "docs" / "devlog").glob("*.md")):
+        m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", log.name)
+        if not m:
+            continue
+        log_key = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if log_key > current_key[:3]:
+            continue
+        if prev_key is not None and log_key <= prev_key[:3]:
+            continue
+        date_str = f"{log_key[0]:04d}-{log_key[1]:02d}-{log_key[2]:02d}"
+        title = _devlog_title(log)
+        if not title:
+            continue
+        # 标题常自带日期（如「2026-08-23 Execution Context Fetch」），前置日期后去掉重复，避免「2026-08-23 2026-08-23 …」
+        if title.startswith(date_str):
+            title = title[len(date_str):].lstrip(" —:-")
+        entry = f"{date_str} {title}"
+        if _is_eval_log(log.name, title):
+            eval_changes.append(entry)
+        else:
+            agent_changes.append(entry)
+    return {
+        "since": f"{prev_key[0]:04d}-{prev_key[1]:02d}-{prev_key[2]:02d} round-{prev_key[3]}" if prev_key else None,
+        "agent_changes": agent_changes,
+        "eval_changes": eval_changes,
+    }
+
+
+def _devlog_title(path: Path) -> str:
+    """提取 devlog 的 # 标题行，失败回退文件名 stem。"""
+    try:
+        m = re.search(r"^#\s+(.+)$", path.read_text(encoding="utf-8"), re.M)
+        if m:
+            return m.group(1).strip()
+    except Exception:
+        pass
+    return path.stem
+
+
+def resolve_previous_summary(round_dir: Path) -> dict | None:
+    """解析上一轮 summary.json；无上一轮时返回 None。
+
+    上一轮 = 按时间序（日期 + round-n）严格早于当前轮次的**最近**一轮：
+    - 同一日期下若有 round-{n-1}，自然命中；
+    - 否则回退到更早日期的最近一轮（支持跨日期对比，如 09-6/round-2 对比 08-17/round-1）。
+    自动排除当前轮次自身的 summary.json（report 可能已写过）。
+    """
+    current_key = _round_key(round_dir)
+    if current_key is None:
+        return None
+    archive = round_dir.parent.parent
+    best_key = None
+    best_path: Path | None = None
+    for summary_path in archive.glob("*/round-*/summary.json"):
+        cand_key = _round_key(summary_path.parent)
+        if cand_key is None or cand_key >= current_key:
+            continue
+        if best_key is None or cand_key > best_key:
+            best_key = cand_key
+            best_path = summary_path
+    if best_path is None:
+        return None
+    try:
+        return json.loads(best_path.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -146,6 +255,8 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
     """在 summary.json 同目录写 report.md（人读报告）。
 
     日期/轮次从 path（round 目录）推断；只作人读层，不改 summary.json。
+    summary 里带 changes（agent/评测侧变更清单）时渲染成「Agent 更新与变化」节，
+    让读者先知道这轮测的是什么版本，再看指标。
     """
     round_dir = Path(path)
     date = round_dir.parent.name
@@ -153,6 +264,7 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
     e2e = summary.get("e2e", {})
     component = summary.get("component", {}) or {}
     diff_vs = summary.get("diff_vs_previous", {}) or {}
+    changes = summary.get("changes") or {}
 
     lines = [
         f"# 评估报告 {date} {round_name}",
@@ -162,9 +274,30 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
         f"- 模型：{model}",
         f"- commit：{commit}",
         "",
-        "## 组件级指标",
-        "",
     ]
+
+    # ── Agent 更新与变化（上一轮 → 本轮，来自 docs/devlog/） ──
+    if changes:
+        since = changes.get("since")
+        lines.append(f"## Agent 更新与变化（{'自 ' + since + ' 以来' if since else '项目开始以来'}）")
+        lines.append("")
+        agent_changes = changes.get("agent_changes") or []
+        eval_changes = changes.get("eval_changes") or []
+        if agent_changes:
+            lines.append("**Agent 侧**（图结构 / 节点 / 工具 / 提示词 / RAG）")
+            lines.append("")
+            lines += [f"- {c}" for c in agent_changes]
+            lines.append("")
+        if eval_changes:
+            lines.append("**评测侧**（样本 / 评测器 / 报告）")
+            lines.append("")
+            lines += [f"- {c}" for c in eval_changes]
+            lines.append("")
+        if not agent_changes and not eval_changes:
+            lines.append("（区间内无开发日志记录）")
+            lines.append("")
+
+    lines += ["## 组件级指标", ""]
     if component:
         lines += ["| 指标 | 值 |", "|---|---|"]
         lines += [f"| {key} | {value} |" for key, value in component.items()]
@@ -175,6 +308,19 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
     for key in _E2E_METRIC_ORDER:
         if key in e2e:
             lines.append(f"| {key} | {e2e[key]} |")
+
+    tool_by_tool = e2e.get("tool_call_by_tool") or {}
+    if tool_by_tool:
+        lines += [
+            "",
+            "## 各工具调用情况",
+            "",
+            "| 工具 | 期望样本 | 实际调用 | 正确 | 准确率 | 误用(未期望却调用) |",
+            "|---|---|---|---|---|---|",
+        ]
+        for t, m in tool_by_tool.items():
+            acc = m["accuracy"] if m["accuracy"] is not None else "-"
+            lines.append(f"| {t} | {m['expected']} | {m['called']} | {m['correct']} | {acc} | {m['unexpected']} |")
 
     lines += ["", "## 与上一轮对比", ""]
     if diff_vs:
@@ -259,3 +405,64 @@ def compute_extended_metrics(outputs: list[dict], samples: list[dict], judged: l
         "avg_token_usage": round(sum(tokens) / len(tokens), 1) if tokens else 0,
         "token_usage_sample_count": len(tokens),
     }
+
+
+def _sample_actual_calls(out: dict | None) -> list[dict]:
+    if not out:
+        return []
+    return (out.get("decision_trace") or {}).get("tool_calls") or []
+
+
+def _tool_call_args(tool_calls: list[dict], tool: str) -> list[str]:
+    """取出某工具的所有调用，归一为 args 的排序 JSON 列表（忽略 result/顺序）。"""
+    return sorted(
+        json.dumps(c.get("args", {}), sort_keys=True) for c in tool_calls if c.get("tool") == tool
+    )
+
+
+def compute_per_tool_metrics(outputs: list[dict], samples: list[dict]) -> dict:
+    """按工具拆分调用情况。工具集合自动从「期望 ∪ 实际」推导，新增工具无需改动此函数。
+
+    对每个工具 t（只统计声明了 expected_tool_calls 的样本）：
+      expected   —— 期望调用 t 的样本数
+      called     —— 实际调用 t 的样本数
+      correct    —— 期望 t 的样本中，t 的实际调用（按 args）与期望调用完全一致
+      accuracy   —— correct/expected（expected==0 时为 None，避免误导）
+      unexpected —— 未期望却实际调用 t 的样本数（误用信号，例如 fetch_execution_context）
+    """
+    by_id = {s["id"]: s for s in samples}
+    outs_by_id = {o.get("id"): o for o in outputs}
+    tools: set[str] = set()
+    for s in samples:
+        for c in (s.get("expected_tool_calls") or []):
+            tools.add(c.get("tool"))
+    for o in outputs:
+        for c in _sample_actual_calls(o):
+            tools.add(c.get("tool"))
+
+    result: dict[str, dict] = {}
+    for t in sorted(tools):
+        expected = correct = called = unexpected = 0
+        for sid, s in by_id.items():
+            exp = s.get("expected_tool_calls")
+            if exp is None:
+                continue  # 未声明期望工具的样本不参与，避免把正常调用误判为误用
+            actual = _sample_actual_calls(outs_by_id.get(sid))
+            norm_act = _tool_call_args(actual, t)
+            exp_t = [c for c in exp if c.get("tool") == t]
+            if norm_act:
+                called += 1
+            if exp_t:
+                expected += 1
+                if norm_act == _tool_call_args(exp, t):
+                    correct += 1
+            elif norm_act:
+                unexpected += 1
+        result[t] = {
+            "expected": expected,
+            "called": called,
+            "correct": correct,
+            "accuracy": round(correct / expected, 4) if expected else None,
+            "unexpected": unexpected,
+        }
+    return result
