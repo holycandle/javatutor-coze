@@ -27,6 +27,23 @@ def test_search_empty_query():
     assert search_chunks("") == []
 
 
+def test_search_chunks_propagates_backend_error():
+    """embedding / 查询后端失败时应向上抛，而非静默吞掉返回 []。
+
+    之前内部 try/except 吞掉异常，导致 retrieve_knowledge 的 except（rag_degraded=True）
+    永远是死代码，RAG 故障被静默掩盖。改为抛出后可正确触发降级信号。
+    """
+
+    def bad_embed(texts):
+        raise RuntimeError("embedding unavailable")
+
+    try:
+        search_chunks("查询", embedder=bad_embed)
+        assert False, "应向上抛出异常，让 retrieve_knowledge 置 rag_degraded=True"
+    except RuntimeError:
+        pass
+
+
 def test_entry_text_includes_rich_fields():
     entry = {
         "title": "Arrays.sort",

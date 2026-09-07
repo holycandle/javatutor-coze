@@ -1,0 +1,64 @@
+{
+  "e2e": {
+    "avg_score": 3.0,
+    "grounding_avg": 2.3226,
+    "total": 31,
+    "correct": 7,
+    "partially_correct": 19,
+    "incorrect": 5,
+    "judge_fallback_rate": 0.0,
+    "empty_output_rate": 0.0,
+    "tool_call_accuracy": 0.5806,
+    "task_success_rate": 0.0968,
+    "avg_latency": 17.044,
+    "avg_token_usage": 2960.5,
+    "token_usage_sample_count": 29,
+    "grounding_verify_applicable": 17,
+    "grounding_verify_checked": 51,
+    "grounding_verify_violations": 1,
+    "grounding_verify_accuracy": 0.9412,
+    "tool_call_by_tool": {
+      "fetch_execution_context": {
+        "expected": 16,
+        "called": 4,
+        "correct": 4,
+        "accuracy": 0.25,
+        "unexpected": 0
+      },
+      "step_facts": {
+        "expected": 16,
+        "called": 15,
+        "correct": 15,
+        "accuracy": 0.9375,
+        "unexpected": 0
+      }
+    }
+  },
+  "component": {},
+  "diff_vs_previous": {
+    "avg_score": -0.5172,
+    "grounding_avg": -0.7808,
+    "component_pass_rate": 0
+  },
+  "changes": {
+    "since": "2026-08-17 round-1",
+    "agent_changes": [
+      "2026-08-19 JavaTutor 领域本体",
+      "2026-08-23 Execution Context Fetch",
+      "2026-08-25 项目知识库核对与扩充",
+      "2026-08-29 Memory Retrieval Context Engineering",
+      "2026-08-30 开发日志：fetch_execution_context 改为 agent 自由调用的读取工具（2026-08-30）",
+      "2026-08-30 开发日志：多文件 / 整体项目理解 Phase 2（2026-08-30）",
+      "2026-08-31 开发日志：agent 无法回答「非当前步」问题的排查与修复（2026-08-31）",
+      "2026-09-02 开发日志：单文件下非当前步证据的 0/1-based 标签错配（2026-09-02）"
+    ],
+    "eval_changes": [
+      "2026-08-18 Judge 结构化输出 + 兜底率 + 人工复核接入导出",
+      "2026-08-21 评估报告 Markdown 生成",
+      "2026-08-24 修复首轮评估报告与自身对比",
+      "2026-08-24 确定性 Grounding 核对器",
+      "2026-09-06 评测黄金样本未跟随新工具库 / RAG 的修复（2026-09-06）",
+      "2026-09-06 评估报告加入「Agent 更新与变化」节（2026-09-06）"
+    ]
+  }
+}
