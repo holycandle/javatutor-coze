@@ -37,9 +37,17 @@ Coze agent 只有 `step_facts`、`fetch_execution_context` 两个工具，且只
 - **`stores/player.js`**：`multiRightTab`/`switchMultiRightTab`（死代码、白名单不一致）替换为 `multiTab`/`switchMultiTab`，白名单扩为 `['variables','flow','datastructure','callgraph','classdiagram','structure','algorithm','tutor']`；新增 `navigateTo(panel, sub)` 动作（单文件走 `switchRightTab`，多文件走 `switchMultiTab`；`panel==='tutor' && sub` 时设 `activeAiTab=sub`）。
 - **`components/MultiFileShell.vue`**：删除本地 `const multiTab = ref('datastructure')`，模板/`switchTab`/`switchGroup`/`rightGroup` computed 全部改用 `store.multiTab`（打通多文件导航，消除死代码）。
 
+### 3.3 review 加固（审查后落地）
+
+按 `docs/reviews/2026-09-07-coze-agent-view-navigation-plan-review.md` 的 P2/P3 + 一审补充，落地三处韧性防御：
+
+- **`components/NavSuggestionCard.vue`**（P2）：按当前 `store.mode` 裁剪 panel（单文件白名单 vs 多文件白名单），agent 违规发出多文件 panel（如单文件下的 `callgraph`）时不再渲染「点开无反应」的死按钮；裁剪后为空则整卡隐藏。
+- **`stores/player.js` `navigateTo`**（P3）：`sub` 加白名单 `['analysis','explain']`，非法 `sub` 不落到 `activeAiTab`，避免 agent 面板两层 tab 都不命中而空白。
+- **`utils/decisionTrace.js`**（一审补充）：无 `【决策痕迹】` 时也经 `parseAssistantMessage` 剥掉正文末尾结构化块，避免裸 JSON 进正文。
+
 ## 4. 测试
 
-- 前端 `vitest`：**22 个文件 / 230 个测试全绿**。新增/更新：
+- 前端 `vitest`：**22 个文件 / 232 个测试全绿**。新增/更新：
   - `editSuggestion.test.js`：`空输入安全` 更新为含 `nav`；新增导航解析/JSON 损坏回退/空 views 回退/最多 3 个/编辑+导航共存用例。
   - `decisionTrace.test.js`：新增剥掉 `【编辑建议】`/`【视角导航】` 块、避免裸 JSON 用例。
   - `stores/__tests__/player-righttab.test.js`：新增 `multiTab` 默认/切换/非法 tab，以及 `navigateTo` 单文件/多文件/tutor+sub/非法 panel 用例。
