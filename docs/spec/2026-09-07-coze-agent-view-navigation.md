@@ -42,7 +42,24 @@ JavaTutor 现有的分析结果（内存状态、流程、数据结构、复杂�
 - `views`：数组，0–3 项；多余裁剪。每项：
   - `panel`（必填）：面板白名单 id（见 §4）。
   - `sub`（可选）：仅 `panel:"tutor"` 时有效——`"analysis"` | `"explain"`。
+  - `algo`（可选）：仅 `panel:"algorithm"` 时有效，用于精确定位算法库子页/分类锚点。见 §3.1.1。
   - `label`（可选）：卡片展示文本；缺省用 panel 的中文规范名（见 §4）。
+
+### 3.1.1 `algo` 精确定位（`panel:"algorithm"`）
+
+沿用前端已有的 `openTutorial(categoryId, anchorId)` 链路（`stores/player.js`，配合 `components/AlgoKnowledgeHeader.vue`
+监听 `store.knowledgeNav.nonce` 定位分类/锚点）。可携带：
+
+```json
+{"panel":"algorithm","label":"树算法知识","algo":{"subTab":"knowledge","categoryId":"tree"}}
+{"panel":"algorithm","label":"算法模板","algo":{"subTab":"template"}}
+```
+
+- `subTab`：`"knowledge"`（算法知识，默认）| `"template"`（算法模板）。
+- `categoryId`：算法知识分类 id（如 `tree`/`sorting`/`graph`/`linked-list`/`search-and-find`）。
+- `anchorId`：具体算法小节锚点 id（如 `归并排序`、`kmpnext-数组与字符串匹配`）；缺省只落到分类。
+- 前端处理：`panel==='algorithm'` 且带 `algo` → `switchRightTab('algorithm')` 后，按 `subTab` 切子页、
+  有 `categoryId`/`anchorId` 时走 `openTutorial(categoryId, anchorId)`；否则仅 `switchRightTab('algorithm')`。
 - 放置：与正文空一行分隔，紧邻 `【决策痕迹】` 之前。前端先按 `【决策痕迹】` 切分（现有
   `splitDecisionTrace`），再在 body 里剥掉 `【视角导航】` / `【编辑建议】`。
 - 无可用面板时整块省略，**不要**发空壳块。最多一个 `【视角导航】` 块/条回答。
@@ -154,3 +171,45 @@ JavaTutor 现有的分析结果（内存状态、流程、数据结构、复杂�
 
 - 不触碰 `javatutor/frontend/src/backup-20260807/AiTutorPanel.vue`（备份副本，含同款 tab 结构）。
 - 右下角算法教程 toast（`AlgoTutorialToast`）本阶段不改，仅确认「以用户点击为准」。
+
+## 9. UI 面板结构同步规约（单一事实源）
+
+> 针对联调暴露的根因：本体的 UI 面板描述与前端实现脱节（`ai_panel` 仍描述旧「三分页」），且本体用
+> `variable_panel`/`heap_panel`/`algo_viz_panel` 等 id 与导航用的 `variables`/`datastructure`/`algorithm`/`tutor` 不一致。
+> 本规约建立**单一事实源**，杜绝「前端改了、本体没用」再次发生。
+
+### 9.1 事实源
+
+`javatutor/frontend/src/constants/ui-panel-manifest.json` 是**唯一**权威的面板结构来源。它定义：
+
+- `modes`：`single` / `multi`。
+- `groups`：`observe`/`learn`/`ask` 归到哪些 panel。
+- `panels`：每个面板的 `id`/`name`(规范名)/`group`/`subTabs`/`content`(一句话描述)/`navHints`(用户问到什么→该导航到哪)。
+- `algorithmLibrary`：算法库 `subTabs`(`knowledge`/`template`) 与 `categories`(`tree`/`sorting`/`graph`/…)。
+
+### 9.2 双端消费
+
+- **前端**：`player.js` 的 `switchRightTab`/`switchMultiTab`/`navigateTo` 白名单、`SingleFileShell`/`MultiFileShell`
+  的 `GROUP_OF_TAB` 分组映射、`NavSuggestionCard` 的模式过滤，全部改从 manifest 读取。→ **改面板结构必先改 manifest**。
+- **coze**：`src/graphs/javatutor/prompting/panels.py` 读取同份 manifest（coze 内提交一份副本
+  `assets/knowledge/ui-panel-manifest.json`），生成 `【视角导航】` 引导块（`render_nav_guidance()`）与
+  「UI 面板导航图」（`render_ui_map()`），注入 `SYSTEM_PROMPT_MAIN_AGENT`；并用于校验收。本体
+  `javatutor_domain_ontology.json` 的 UI 面板模块（`modules`），其 `id`/`name`/子页结构必须与 manifest 一致，
+  内容字段（`function`/`data_field`/`common_confusions`）仍人工维护。
+
+### 9.3 同步与守卫（可执行规约）
+
+- `scripts/sync_panel_manifest.py`：读前端 manifest（同工作区相对路径 `../javatutor/frontend/src/constants/ui-panel-manifest.json`）
+  → 同步/比对 coze 副本 → drift 报错；并校验本体 `modules` UI 结构与 manifest 一致。
+- `tests/test_panel_sync.py`（coze，`uv run pytest`）：断言 ① coze 副本与前端 manifest 一致（路径可达时）；
+  ② 本体 `modules` 的 UI 面板 `id`/`name`/子页与 manifest 一致；③ 渲染出的 `【视角导航】` 引导与 manifest 一致；
+  ④ 无旧「三分页」等过时残留。
+- `ui-panel-manifest.test.js`（前端，vitest，进前端 CI）：manifest 内部自洽（groups/panels/subTabs 合法）、
+  与 `player.js` 白名单/分组映射一致、可 JSON 序列化。
+
+### 9.4 变更守则
+
+> **改前端任何面板/标签（新增、删除、改名、合并、拆分子页）⇒ 必须在同一改动里更新
+> `ui-panel-manifest.json`，并跑 `uv run pytest tests/test_panel_sync.py`（coze）与前端 `npm test`。**
+> 若 manifest 结构（id/子页）变化，直接改 manifest；本体 `modules` 与提示词引导由脚本/校验兜底，无需手改结构。
+> 需同步更新 `docs/agent-collaboration-guide.md` 的对应描述。

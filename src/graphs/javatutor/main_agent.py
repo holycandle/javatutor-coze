@@ -6,10 +6,16 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
+from graphs.javatutor.prompting.panels import render_nav_guidance, render_ui_map
 from tools.fetch_execution_context import fetch_execution_context
 from tools.step_facts import step_facts
 
 MAX_ROUNDS = 3
+
+
+def _main_system_prompt() -> str:
+    """主 Agent 系统提示 = 模板 + 运行时注入的【视角导航】引导与「UI 面板导航图」（随 manifest 联动）。"""
+    return f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_ui_map()}"
 
 
 def _resolve_model(model):
@@ -136,7 +142,7 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
-            SystemMessage(content=SYSTEM_PROMPT_MAIN_AGENT),
+            SystemMessage(content=_main_system_prompt()),
             HumanMessage(content=f"{context}\n\n[当前轮次] {rounds}"),
         ]
         try:

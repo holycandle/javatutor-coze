@@ -11,7 +11,7 @@
     {
       "id": "variable_panel",
       "name": "变量卡片",
-      "function": "展示当前栈帧下局部变量与参数的当前值快照，位于「内存监控」面板的栈区内，非独立面板",
+      "function": "展示当前栈帧下局部变量与参数的当前值快照，位于「内存状态」面板的栈区内，非独立面板",
       "data_field": "steps[i].stackFrames[*].locals（主来源）；steps[i].variables（旧字段/无栈帧时回退）",
       "ui_behavior": "变量值在相邻步骤间发生变化时荧光高亮",
       "common_confusions": [
@@ -23,7 +23,7 @@
     {
       "id": "heap_panel",
       "name": "堆面板",
-      "function": "「内存监控」面板的堆区，展示学生代码 new 出来的复杂对象（堆对象）及其字段/数组槽/映射键值",
+      "function": "「内存状态」面板的堆区，展示学生代码 new 出来的复杂对象（堆对象）及其字段/数组槽/映射键值",
       "data_field": "steps[i].heap",
       "ui_behavior": "对象字段或数组槽值在相邻步骤间变化时荧光高亮",
       "common_confusions": [
@@ -34,7 +34,7 @@
     {
       "id": "stack_panel",
       "name": "调用栈",
-      "function": "「内存监控」面板的栈区，展示方法调用栈，每层栈帧含方法名、参数与局部变量卡片",
+      "function": "「内存状态」面板的栈区，展示方法调用栈，每层栈帧含方法名、参数与局部变量卡片",
       "data_field": "steps[i].stackFrames",
       "ui_behavior": "方法调用或返回时增删栈帧",
       "common_confusions": [
@@ -75,9 +75,9 @@
     {
       "id": "ai_panel",
       "name": "AI 讲解面板",
-      "function": "含三个分页：解说（自由问答）、复杂度（时间/空间复杂度）、算法（算法与数据结构标签，点击标签可发起解说）",
+      "function": "含两个分页：解说（自由问答）、分析（时间复杂度/空间复杂度 + 算法/数据结构标签，点击标签可发起解说）",
       "data_field": null,
-      "ui_behavior": "解说页流式渲染 Agent 回答；复杂度页展示分析卡片；算法页展示可点击标签",
+      "ui_behavior": "解说页流式渲染 Agent 回答；分析页展示复杂度卡片与可点击的算法/数据结构标签",
       "common_confusions": []
     },
     {
