@@ -56,7 +56,7 @@ JavaTutor 现有的分析结果（内存状态、流程、数据结构、复杂�
 ```
 
 - `subTab`：`"knowledge"`（算法知识，默认）| `"template"`（算法模板）。
-- `categoryId`：算法知识分类 id（如 `tree`/`sorting`/`graph`/`linked-list`/`search-and-find`）。
+- `categoryId`：算法知识分类 id（**合法全集见** `javatutor/frontend/src/assets/algo-knowledge/index.json`，如 `tree`/`sorting`/`fundamentals`/`dp`/`graph`/`linked-list`/`search-and-find`）。
 - `anchorId`：具体算法小节锚点 id（如 `归并排序`、`kmpnext-数组与字符串匹配`）；缺省只落到分类。
 - 前端处理：`panel==='algorithm'` 且带 `algo` → `switchRightTab('algorithm')` 后，按 `subTab` 切子页、
   有 `categoryId`/`anchorId` 时走 `openTutorial(categoryId, anchorId)`；否则仅 `switchRightTab('algorithm')`。
@@ -185,22 +185,28 @@ JavaTutor 现有的分析结果（内存状态、流程、数据结构、复杂�
 - `modes`：`single` / `multi`。
 - `groups`：`observe`/`learn`/`ask` 归到哪些 panel。
 - `panels`：每个面板的 `id`/`name`(规范名)/`group`/`subTabs`/`content`(一句话描述)/`navHints`(用户问到什么→该导航到哪)。
-- `algorithmLibrary`：算法库 `subTabs`(`knowledge`/`template`) 与 `categories`(`tree`/`sorting`/`graph`/…)。
+- `algorithmLibrary`：算法库 `subTabs`(`knowledge`/`template`)。
+- 算法知识目录**独立成源**（不在 manifest 内定义）：`javatutor/frontend/src/assets/algo-knowledge/index.json`
+  （分类 + 锚点 id），经 `scripts/sync_panel_manifest.py` 同步到 coze 副本 `assets/knowledge/algo-knowledge-index.json`，
+  由 `prompting/panels.py` 的 `render_algo_catalog()` 消费。
 
 ### 9.2 双端消费
 
 - **前端**：`player.js` 的 `switchRightTab`/`switchMultiTab`/`navigateTo` 白名单、`SingleFileShell`/`MultiFileShell`
   的 `GROUP_OF_TAB` 分组映射、`NavSuggestionCard` 的模式过滤，全部改从 manifest 读取。→ **改面板结构必先改 manifest**。
 - **coze**：`src/graphs/javatutor/prompting/panels.py` 读取同份 manifest（coze 内提交一份副本
-  `assets/knowledge/ui-panel-manifest.json`），生成 `【视角导航】` 引导块（`render_nav_guidance()`）与
-  「UI 面板导航图」（`render_ui_map()`），注入 `SYSTEM_PROMPT_MAIN_AGENT`；并用于校验收。本体
+  `assets/knowledge/ui-panel-manifest.json`），生成 `【视角导航】` 引导块（`render_nav_guidance()`）、
+  「UI 面板导航图」（`render_ui_map()`）、「算法知识目录」（`render_algo_catalog()`，读
+  `assets/knowledge/algo-knowledge-index.json`）与「使用流程指南」（`render_usage_guide()`，读本体 `user_guides`），
+  随 `main_agent.py` 运行时拼装进 `SYSTEM_PROMPT_MAIN_AGENT`（另注 `MAIN_FEW_SHOTS`）；并用于校验收。本体
   `javatutor_domain_ontology.json` 的 UI 面板模块（`modules`），其 `id`/`name`/子页结构必须与 manifest 一致，
-  内容字段（`function`/`data_field`/`common_confusions`）仍人工维护。
+  内容字段（`function`/`data_field`/`common_confusions`）以及顶层 `user_guides` 仍人工维护。
 
 ### 9.3 同步与守卫（可执行规约）
 
 - `scripts/sync_panel_manifest.py`：读前端 manifest（同工作区相对路径 `../javatutor/frontend/src/constants/ui-panel-manifest.json`）
-  → 同步/比对 coze 副本 → drift 报错；并校验本体 `modules` UI 结构与 manifest 一致。
+  → 同步/比对 coze 副本 → drift 报错；并校验本体 `modules` UI 结构与 manifest 一致；同步/比对算法目录副本
+  （`../javatutor/frontend/src/assets/algo-knowledge/index.json` → `assets/knowledge/algo-knowledge-index.json`）。
 - `tests/test_panel_sync.py`（coze，`uv run pytest`）：断言 ① coze 副本与前端 manifest 一致（路径可达时）；
   ② 本体 `modules` 的 UI 面板 `id`/`name`/子页与 manifest 一致；③ 渲染出的 `【视角导航】` 引导与 manifest 一致；
   ④ 无旧「三分页」等过时残留。

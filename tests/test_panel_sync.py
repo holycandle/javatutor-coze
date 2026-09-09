@@ -12,9 +12,13 @@ from graphs.javatutor.prompting.panels import (
     MANIFEST_PATH,
     MODULE_PANELS,
     load_manifest,
+    load_algo_index,
     render_nav_guidance,
     render_ui_map,
+    render_algo_catalog,
+    render_usage_guide,
 )
+from graphs.javatutor.prompting.main_fewshots import get_main_few_shots
 
 
 def _repo_root() -> Path:
@@ -27,6 +31,7 @@ def _repo_root() -> Path:
 
 ROOT = _repo_root()
 FRONTEND_MANIFEST = ROOT / ".." / "javatutor" / "frontend" / "src" / "constants" / "ui-panel-manifest.json"
+FRONTEND_ALGO_INDEX = ROOT / ".." / "javatutor" / "frontend" / "src" / "assets" / "algo-knowledge" / "index.json"
 ONTOLOGY = ROOT / "assets" / "knowledge" / "javatutor_domain_ontology.json"
 
 
@@ -101,3 +106,53 @@ def test_ui_map_renders_all_panels():
     manifest = load_manifest()
     for panel_id, p in manifest["panels"].items():
         assert p["name"] in ui_map
+
+
+def test_algo_copy_matches_frontend():
+    """coze 算法目录副本与前端单一事实源一致（路径可达时）。"""
+    coze = load_algo_index()
+    if not FRONTEND_ALGO_INDEX.exists():
+        pytest.skip("前端算法目录不存在，跳过跨仓比对")
+    frontend = json.loads(FRONTEND_ALGO_INDEX.read_text(encoding="utf-8"))
+    assert coze == frontend, "coze 算法目录副本与前端不一致（运行 scripts/sync_panel_manifest.py --sync）"
+
+
+def test_render_algo_catalog_contains_all_categories_and_anchors():
+    algo = load_algo_index()
+    catalog = render_algo_catalog()
+    for cat in algo["categories"]:
+        assert str(cat["id"]) in catalog, f"分类 {cat.get('id')} 未出现在算法知识目录"
+        for a in cat["anchors"]:
+            assert str(a["id"]) in catalog, f"锚点 {a.get('id')} 未出现在算法知识目录"
+
+
+def test_user_guides_covers_test_mode_and_run():
+    ont = _load_ontology()
+    topics = {g.get("topic") for g in ont.get("user_guides", [])}
+    assert "运行代码" in topics
+    assert "测试模式" in topics
+    guide = render_usage_guide()
+    assert "测试模式" in guide
+    assert "不应附导航卡" in guide
+
+
+def test_render_nav_guidance_closed_set_boundary():
+    """③ 导航边界为闭集：列明「除此之外不存在任何导航目标」，并明确测试模式等操作流程不可附卡。"""
+    nav = render_nav_guidance()
+    assert "只有且仅有" in nav
+    assert "不存在任何导航目标" in nav
+    assert "不可附卡" in nav
+    assert "块之后不要再写任何正文" in nav
+
+
+def test_main_few_shots_valid():
+    """⑤ MAIN_FEW_SHOTS 注入：样本含合法 panel/sub/algo 形态、含「非面板主题不附卡」样例、不出现裸结构块。"""
+    shots = get_main_few_shots()
+    assert len(shots) >= 3
+    joined = "\n".join(shots)
+    assert "subTab" in joined and "categoryId" in joined and "anchorId" in joined
+    assert "测试模式" in joined and "不附导航卡" in joined
+    for s in shots:
+        if "【视角导航】" in s:
+            after = s.split("【视角导航】")[1].strip()
+            assert after.startswith("{"), "【视角导航】块后不应再有正文（避免裸 JSON 上屏）"

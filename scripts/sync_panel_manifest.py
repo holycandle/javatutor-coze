@@ -32,6 +32,8 @@ from graphs.javatutor.prompting.panels import MODULE_PANELS  # noqa: E402
 FRONTEND_MANIFEST = ROOT / ".." / "javatutor" / "frontend" / "src" / "constants" / "ui-panel-manifest.json"
 COZE_MANIFEST = ROOT / "assets" / "knowledge" / "ui-panel-manifest.json"
 ONTOLOGY = ROOT / "assets" / "knowledge" / "javatutor_domain_ontology.json"
+FRONTEND_ALGO_INDEX = ROOT / ".." / "javatutor" / "frontend" / "src" / "assets" / "algo-knowledge" / "index.json"
+COZE_ALGO_INDEX = ROOT / "assets" / "knowledge" / "algo-knowledge-index.json"
 
 
 def _load(path: Path) -> dict:
@@ -96,11 +98,30 @@ def check_ontology() -> int:
     return 0
 
 
+def check_algo_copy(sync: bool) -> int:
+    """coze 算法目录副本与前端单一事实源一致；--sync 时覆盖。"""
+    if not FRONTEND_ALGO_INDEX.exists():
+        print(f"[warn] 前端算法目录不存在：{FRONTEND_ALGO_INDEX}，跳过跨仓比对")
+        return 0
+    frontend = _load(FRONTEND_ALGO_INDEX)
+    coze = _load(COZE_ALGO_INDEX)
+    if frontend == coze:
+        print("coze 算法目录副本与前端一致")
+        return 0
+    if sync:
+        _dump(COZE_ALGO_INDEX, frontend)
+        print("已用前端算法目录覆盖 coze 副本")
+        return 0
+    print("DRIFT: coze 算法目录副本与前端不一致（可加 --sync 覆盖）")
+    return 1
+
+
 def main() -> int:
     sync = "--sync" in sys.argv
     code = 0
     code |= check_coze_copy(sync)
     code |= check_ontology()
+    code |= check_algo_copy(sync)
     return code
 
 

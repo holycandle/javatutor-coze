@@ -6,7 +6,13 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
-from graphs.javatutor.prompting.panels import render_nav_guidance, render_ui_map
+from graphs.javatutor.prompting.panels import (
+    render_nav_guidance,
+    render_ui_map,
+    render_algo_catalog,
+    render_usage_guide,
+)
+from graphs.javatutor.prompting.main_fewshots import get_main_few_shots
 from tools.fetch_execution_context import fetch_execution_context
 from tools.step_facts import step_facts
 
@@ -14,8 +20,12 @@ MAX_ROUNDS = 3
 
 
 def _main_system_prompt() -> str:
-    """主 Agent 系统提示 = 模板 + 运行时注入的【视角导航】引导与「UI 面板导航图」（随 manifest 联动）。"""
-    return f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_ui_map()}"
+    """主 Agent 系统提示 = 模板 + 运行时注入的视角导航引导 / 算法知识目录 / 使用流程指南 / few-shot（随 manifest 联动）。"""
+    few = "\n\n".join(get_main_few_shots())
+    return (
+        f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_algo_catalog()}\n\n"
+        f"{render_usage_guide()}\n\n{render_ui_map()}\n\n## 回答示例\n{few}"
+    )
 
 
 def _resolve_model(model):

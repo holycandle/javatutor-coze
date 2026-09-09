@@ -11,6 +11,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from graphs.javatutor.prompting.ontology import load_ontology
+
 # 本体模块 id → 导航面板 id；None 表示该模块不是独立导航目标（不参与导航/校验）。
 MODULE_PANELS = {
     "editor": None,
@@ -43,6 +45,15 @@ def load_manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
+ALGO_INDEX_PATH = _repo_root() / "assets" / "knowledge" / "algo-knowledge-index.json"
+
+
+@lru_cache(maxsize=1)
+def load_algo_index() -> dict:
+    """读取算法知识目录（coze 副本，源自 frontend/src/assets/algo-knowledge/index.json）。"""
+    return json.loads(ALGO_INDEX_PATH.read_text(encoding="utf-8"))
+
+
 def _single_panels(manifest: dict) -> list[dict]:
     """单文件模式可用的面板（排除 mode=multi）。"""
     return [
@@ -66,24 +77,31 @@ def _format_panel(p: dict) -> str:
 
 
 def render_nav_guidance() -> str:
-    """生成 SYSTEM_PROMPT_MAIN_AGENT 的【视角导航】指引段（替换原先硬编码在 prompts.py 的块）。"""
+    """生成 SYSTEM_PROMPT_MAIN_AGENT 的【视角导航】指引段，**以导航边界（闭集）为首要原则**。
+
+    边界不立清楚，agent 会从能想到的面板里硬凑（如在「测试模式」这类非面板主题上附无关卡）。
+    故把「可导航集合 = 固定闭集 + 非面板主题不可附卡」写成显式规则；「流程问题不附卡」只是其自然推论。
+    """
     manifest = load_manifest()
     single = "、".join(_format_panel(p) for p in _single_panels(manifest))
     multi = "、".join(_format_panel(p) for p in _multi_only_panels(manifest))
-    sub_tabs = "|".join(manifest["algorithmLibrary"]["subTabs"])
+    sub_tabs = " / ".join(manifest["algorithmLibrary"]["subTabs"])
     return (
-        "当回答有助于用户定位到某个面板时，可在回答末尾（【决策痕迹】之前）追加一个「视角导航块」，前端会渲染成可点击卡片：\n"
+        "可导航目标**只有且仅有**这些面板（闭集）：\n"
+        f"- 单文件：{single}；\n"
+        f"- 多文件额外支持：{multi}；\n"
+        '- 算法库可通过 algo 细分，示例：{"subTab":"knowledge","categoryId":"tree","anchorId":"后序遍历"}（定位「树（堆）→后序遍历」）；subTab 合法取值：'
+        f'{sub_tabs}；algo 仅用于 panel=algorithm。\n'
+        "- **除上述之外不存在任何导航目标**：测试模式、运行代码、输入用例、文件管理、设置等「操作/流程」主题对应不到任何面板，**不可附卡**，直接给操作步骤（见「使用流程指南」）。\n"
+        "- 只有当用户想**直接看某个面板里已有的分析/可视化**时才值得附 1 张卡；不要为了导航而导航、不要用无关面板硬凑。\n\n"
+        "当回答有助于用户定位到某个面板时，可在回答末尾追加「视角导航块」，前端会渲染成可点击卡片：\n"
         "【视角导航】\n"
         '{"views":[{"panel":"tutor","sub":"analysis","label":"分析"}]}\n\n'
-        "规则：\n"
-        f"- panel 取值（单文件）：{single}；\n"
-        f"- 多文件项目额外支持：{multi}；\n"
-        "- sub 仅当 panel 为 tutor 时使用：analysis(分析)/explain(解说)；其他 panel 不要带 sub；\n"
-        f'- algo 仅当 panel 为 algorithm 时使用（精确定位算法库子页）：{{"subTab":"{sub_tabs}","categoryId":"tree","anchorId":"..."}}；\n'
-        "- 仅当某面板能帮用户直接看到相关分析时才附卡，通常 1 个、最多 3 个；\n"
-        "- 每个回答最多一个【视角导航】块；没有合适面板时整个省略，不要发空壳块；\n"
-        "- 导航要融入回答，不要为了导航而发消息；\n"
-        f"- tutor 仅当想让用户看 agent 的解说/分析时用；「去哪看 X」应指向内容面板（variables/flow/datastructure/algorithm/…），不要指向 tutor（用户已在 agent 面板）。"
+        "放置与取值规则：\n"
+        "- 【视角导航】追加在回答**最末尾**，紧邻【决策痕迹】之前；**块之后不要再写任何正文**。\n"
+        "- 每个回答最多一个【视角导航】块；没有合适面板时整块省略，不要发空壳块；导航要融入回答。\n"
+        "- sub 仅当 panel 为 tutor 时使用：analysis(分析)/explain(解说)；其他 panel 不要带 sub。\n"
+        "- tutor 仅当想让用户看 agent 的解说/分析时用；「去哪看 X」应指向内容面板（variables/flow/datastructure/algorithm/…），不要指向 tutor（用户已在 agent 面板）。"
     )
 
 
@@ -107,4 +125,35 @@ def render_ui_map() -> str:
         hints = p.get("navHints") or []
         if hints:
             lines.append(f"- 「{'/'.join(hints)}」→ {p['name']}（{pid}）")
+    return "\n".join(lines)
+
+
+def render_algo_catalog() -> str:
+    """生成「算法知识目录」——分类 id + 标题 + 锚点 id 清单，供 algo 精确定位落到分类/锚点。
+
+    事实源：assets/knowledge/algo-knowledge-index.json（源自 frontend/src/assets/algo-knowledge/index.json）。
+    锚点 id 为中文全称（如「后序遍历」），不要用英文缩写生成 anchorId。不存在的 categoryId/anchorId 前端会回退默认、不崩。
+    """
+    data = load_algo_index()
+    lines: list[str] = ["算法知识目录（算法库「算法知识」子页的合法分类与锚点 id）："]
+    for cat in data.get("categories", []):
+        anchors = "、".join(f"{a.get('title')}（{a.get('id')}）" for a in cat.get("anchors", []))
+        lines.append(f"- {cat.get('title')}（categoryId={cat.get('id')}）；锚点：{anchors}")
+    return "\n".join(lines)
+
+
+def render_usage_guide() -> str:
+    """生成「使用流程指南」——运行/测试模式/查看输出/单步播放/分析页等操作流程。
+
+    事实源：本体 assets/knowledge/javatutor_domain_ontology.json 的 user_guides。
+    用于让 agent 知道测试模式等「操作/流程」主题**存在且如何用**，从而正确给步骤而非附导航卡。
+    """
+    ont = load_ontology()
+    guides = ont.get("user_guides") or []
+    lines: list[str] = ["使用流程指南（用户询问这些操作/流程时回答实际步骤，**不应附导航卡**）："]
+    for g in guides:
+        steps = "；".join(g.get("steps", []))
+        lines.append(f"- {g.get('topic')}：{steps}")
+        if g.get("note"):
+            lines.append(f"  - 说明：{g['note']}")
     return "\n".join(lines)
