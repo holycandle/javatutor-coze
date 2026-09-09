@@ -139,6 +139,7 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     step_memories = []
     fetched_state_updates = {}
     served_step_indices: set = set()
+    fetched_injected = False
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
@@ -157,7 +158,12 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
         if tool["tool"] == "fetch_execution_context":
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
             context += _handle_fetch(tool_calls, fetched_state_updates, state, args)
+            fetched_injected = True
         elif tool["tool"] == "step_facts":
+            if not fetched_injected:
+                # 查单步证据前先把源码读进上下文，防止 agent 只调 step_facts 拿不到源码全文
+                context += _handle_fetch(tool_calls, fetched_state_updates, state, {})
+                fetched_injected = True
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
             try:
                 result = step_facts(state, **args)
