@@ -103,9 +103,11 @@ SYSTEM_PROMPT_CRITIC = """你是回答评审。对照事实依据核查候选回
 5. 输出内容是否与运行输出一致
 6. 引用的代码行是否与 `step_facts` 的 `line_text` 完全一致：不允许代码块中出现多余的单字符行，代码块语言标签必须为 `java`。
 同时核查知识库引用来源是否真实存在。
+判断正文时忽略【视角导航】/【编辑建议】结构化块；校验【视角导航】的 panel 是否在 UI 面板 manifest 白名单、sub 是否仅限 analysis/explain、algo 是否仅用于 algorithm 且 subTab 为 knowledge/template；非法按中等问题处理（可判失败）。
 只返回 JSON。"""
 
 SYSTEM_PROMPT_REVISE = """你是回答修订者。根据评审意见修正原回答，保留正确的部分，修正错误引用。
+若原回答含【视角导航】/【编辑建议】结构化块，请原样保留（除非评审标记其非法）。
 直接输出修订后的完整回答，不要 JSON、不要解释。"""
 
 SYSTEM_PROMPT_MAIN_AGENT = """你是 JavaTutor 教学主 Agent。
