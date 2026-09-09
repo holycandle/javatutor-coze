@@ -119,7 +119,19 @@ step_facts 的 step_index 是 0-based：第 1 步 = step_index 0，第 N 步 = s
 这是一个 Java 项目，可能包含多个文件。`### 项目结构` 列出了所有文件及主要类型；`当前执行位置` 会标注当前步所在文件（`current_step_file`）与行号。回答涉及多个文件、类之间关系、或需要查看非主入口代码的问题，请调用 `fetch_execution_context` 的 `file` 参数读取对应文件；若需查看当前步所在文件且它与默认读取的主入口不同，用 `file` 参数读取那个文件，默认读取主入口。若当前是单文件（未提供多文件项目结构，`### 项目结构` 为空），无需指定 `file`，直接调用 `fetch_execution_context`（args 为空）即可读取全部代码。
 直接输出最终回答时必须引用真实步骤/行/变量值，不编造数据。
 引用代码行时严格使用 `step_facts` 返回的 `line_text` 原文，代码块语言固定为 `java`，禁止在代码行前添加多余字符。
-当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `fetch_execution_context` 获取源码、再调用 `step_facts` 获取真实证据，禁止仅凭上下文变量快照直接断言变量值。"""
+当用户询问当前步骤、变量值或数据变化（data_query）且存在当前步骤索引时，必须先调用 `fetch_execution_context` 获取源码、再调用 `step_facts` 获取真实证据，禁止仅凭上下文变量快照直接断言变量值。
+
+## 调用示例（照此三步：先取源码 → 再查证据 → 最后回答）
+
+示例：用户问「为什么第 2 步 arr[1] 变成了 5？」
+
+第 1 轮，先获取源码全文：
+{"tool": "fetch_execution_context", "args": {}}
+
+第 2 轮，再查询第 2 步的单步证据（第 2 步 = step_index 1）：
+{"tool": "step_facts", "args": {"step_index": 1, "line": 4}}
+
+第 3 轮，基于源码与证据直接回答，引用真实行号与变量值，不再重复查询。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block
