@@ -92,9 +92,10 @@ def test_main_agent_calls_step_facts_then_answers():
     model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"])
     out = main_agent_node(STATE, model=model)
     assert out["tool_rounds"] == 2
-    assert out["tool_calls"][0]["tool"] == "step_facts"
-    assert out["tool_calls"][0]["args"] == {"step_index": 1}
-    assert "result" in out["tool_calls"][0]  # 返回值被截断记录，供决策痕迹诊断
+    assert out["tool_calls"][0]["tool"] == "fetch_execution_context"  # 查 step_facts 前自动前置 fetch
+    assert out["tool_calls"][1]["tool"] == "step_facts"
+    assert out["tool_calls"][1]["args"] == {"step_index": 1}
+    assert "result" in out["tool_calls"][1]  # 返回值被截断记录，供决策痕迹诊断
     assert "x 变成了 2" in out["answer"]
 
 
@@ -132,7 +133,8 @@ def test_main_agent_invalid_args_returns_error_not_crash():
     out = main_agent_node(STATE, model=model)
     assert "error" in out["answer"] or out["answer"]
     assert out["tool_rounds"] == 2
-    assert out["tool_calls"][0]["tool"] == "step_facts"
+    assert out["tool_calls"][0]["tool"] == "fetch_execution_context"  # 自动前置 fetch
+    assert out["tool_calls"][1]["tool"] == "step_facts"
 
 
 def test_main_agent_unknown_tool_not_leaked_as_answer():
@@ -165,6 +167,27 @@ def test_main_agent_dispatches_fetch_execution_context():
     }
     out = main_agent_node(state, model=model)
     assert any(tc["tool"] == "fetch_execution_context" for tc in out["tool_calls"])
+    assert out["fetched_context"]["run_id"] == "r1"
+
+
+def test_step_facts_auto_fetches_first():
+    """agent 直接调 step_facts 时，应先自动 fetch 一次拿源码，再查单步证据。"""
+    model = SequenceModel(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"])
+    state = {
+        "run_id": "r1",
+        "source_code": "public class A { void f() { int x = 1; } }",
+        "steps": [
+            {"step": 0, "line": 3, "variables": {"x": 1}},
+            {"step": 1, "line": 3, "variables": {"x": 2}},
+        ],
+        "current_step_index": 1,
+        "current_line": 3,
+        "context_built": "context",
+    }
+    out = main_agent_node(state, model=model)
+    tools = [tc["tool"] for tc in out["tool_calls"]]
+    assert tools[0] == "fetch_execution_context"
+    assert tools[1] == "step_facts"
     assert out["fetched_context"]["run_id"] == "r1"
 
 
