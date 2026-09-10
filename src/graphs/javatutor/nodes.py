@@ -357,6 +357,9 @@ def _strip_leaked_json(text: str) -> str:
     - 开头的 {"intent":...,"confidence":...}
     - 任意位置的 {"pass":...,"issues":[...]}
     这些来自中间 LLM 调用，不应出现在最终回答中。
+
+    注意：【视角导航】块（{"views":[...]}）是受控输出指令，不以 intent/pass/tool 开头，
+    不会被本函数剥离，前后端依赖其原样透传。见 docs/spec/2026-09-07-coze-agent-view-navigation.md。
     """
     import re as _re
 

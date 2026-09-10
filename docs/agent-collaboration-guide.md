@@ -17,7 +17,7 @@ flowchart TD
     H --> I[critic<br/>核查步骤号、行号、变量、堆 id、输出]
     I --> J[revise<br/>发现问题最多改一轮]
     J --> K[save_session<br/>把本轮摘要写回记忆]
-    K --> L[build_final<br/>最终答案 + 决策痕迹 JSON]
+    K --> L[build_final<br/>最终答案 + 决策痕迹 JSON + 视角导航块]
 ```
 
 ## 信息分层原则
@@ -49,13 +49,13 @@ flowchart TD
 | `critic` | 事实核查五类数字和值，防止编造 | LLM |
 | `revise` | 有错就改一轮，不无限循环 | LLM |
 | `save_session` | 把本轮摘要写回记忆，供下一轮复用 | 确定性 |
-| `build_final` | 拼最终回答和 `【决策痕迹】` JSON | 规则 |
+| `build_final` | 拼最终回答和 `【决策痕迹】` JSON，并透传可选的 `【视角导航】` 块 | 规则 |
 
 ## 输入输出
 
 - 输入：`run_id`、`session_id`、`user_question`、可选 `intent`。
 - 输出（`intent=analyze`）：结构化 JSON（复杂度、算法、数据结构标签），不经后续问答链路。
-- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`）。
+- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`）。回答还可附带可选的 `【视角导航】` 块（前端渲染为可点击卡片，跳转面板），协议见 `docs/spec/2026-09-07-coze-agent-view-navigation.md`。
 
 ## 上手三件事
 
@@ -64,4 +64,9 @@ flowchart TD
 3. Codex 负责写 spec 和 plan，Claude Code 按 plan 执行，人负责 review。
 
 相关设计规格见 `docs/spec/`；记忆检索与上下文工程项目见 `docs/spec/2026-08-29-memory-retrieval-context-engineering-design.md`。
+
+- **UI 面板结构同步规约**：改前端任一面板/标签（新增、删除、改名、合并、拆子页）⇒ 必须更新
+  `javatutor/frontend/src/constants/ui-panel-manifest.json`（**单一事实源**），并跑 `uv run pytest tests/test_panel_sync.py`（coze）
+  与前端 `npm test`；coze 侧本体 `modules`/`prompts.py` 的 UI 结构由 `scripts/sync_panel_manifest.py` 自动同步，勿手改。
+  见 `docs/spec/2026-09-07-coze-agent-view-navigation.md` §9。
 

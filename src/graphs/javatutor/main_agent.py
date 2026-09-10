@@ -6,10 +6,26 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
+from graphs.javatutor.prompting.panels import (
+    render_nav_guidance,
+    render_ui_map,
+    render_algo_catalog,
+    render_usage_guide,
+)
+from graphs.javatutor.prompting.main_fewshots import get_main_few_shots
 from tools.fetch_execution_context import fetch_execution_context
 from tools.step_facts import step_facts
 
 MAX_ROUNDS = 3
+
+
+def _main_system_prompt() -> str:
+    """主 Agent 系统提示 = 模板 + 运行时注入的视角导航引导 / 算法知识目录 / 使用流程指南 / few-shot（随 manifest 联动）。"""
+    few = "\n\n".join(get_main_few_shots())
+    return (
+        f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_algo_catalog()}\n\n"
+        f"{render_usage_guide()}\n\n{render_ui_map()}\n\n## 回答示例\n{few}"
+    )
 
 
 def _resolve_model(model):
@@ -133,10 +149,11 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
     step_memories = []
     fetched_state_updates = {}
     served_step_indices: set = set()
+    fetched_injected = False
     while rounds < MAX_ROUNDS:
         rounds += 1
         messages = [
-            SystemMessage(content=SYSTEM_PROMPT_MAIN_AGENT),
+            SystemMessage(content=_main_system_prompt()),
             HumanMessage(content=f"{context}\n\n[当前轮次] {rounds}"),
         ]
         try:
@@ -151,7 +168,12 @@ def main_agent_node(state, model=None) -> dict[str, Any]:
         if tool["tool"] == "fetch_execution_context":
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
             context += _handle_fetch(tool_calls, fetched_state_updates, state, args)
+            fetched_injected = True
         elif tool["tool"] == "step_facts":
+            if not fetched_injected:
+                # 查单步证据前先把源码读进上下文，防止 agent 只调 step_facts 拿不到源码全文
+                context += _handle_fetch(tool_calls, fetched_state_updates, state, {})
+                fetched_injected = True
             args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
             try:
                 result = step_facts(state, **args)
