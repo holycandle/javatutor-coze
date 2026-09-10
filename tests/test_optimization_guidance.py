@@ -78,6 +78,33 @@ def test_optimization_guidance_keeps_patch_path():
     assert "每答最多一个【编辑建议】块" in text
 
 
+def test_goal_enum_includes_comprehensive():
+    """comprehensive 只用于第二步 replace；方案卡不得产出它（否则成无法再拆的选项）。"""
+    assert GOALS["comprehensive"] == "综合"
+    assert len(GOALS) == 6
+    from graphs.javatutor.prompting.optimization import CARD_GOALS
+
+    assert "comprehensive" not in CARD_GOALS
+    assert set(CARD_GOALS) | {"comprehensive"} == set(GOALS)
+
+
+def test_guidance_states_hard_direction_constraint():
+    """第二步方向硬约束：白名单只做所列、黑名单不得顺手改、多方向记 comprehensive。
+
+    这三条是「用户在方案卡上勾了什么，代码里就只改什么」的唯一保险；引导丢了它们，
+    agent 会退回「顺手全优化」——正是 F1–F3 要修的行为。
+    """
+    text = render_optimization_guidance()
+    assert "只做所列方向" in text
+    assert "不得改造" in text
+    assert "不得顺手改" in text
+    assert "不要顺带做" in text
+    assert "comprehensive" in text
+    assert "rationale" in text
+    # 引导里的白名单表述必须与前端模板同款，否则 agent 认不出用户提问里的约束
+    assert "只做" in text and "不要顺带做其他方向的改动" in text
+
+
 def _extract_block_json(sample: str) -> dict:
     """取出样本中【编辑建议】块后的 JSON（块必须是样本最后内容）。"""
     assert "【编辑建议】" in sample
@@ -103,6 +130,7 @@ def test_main_fewshots_optimization_samples_valid():
             assert len(parsed["options"]) <= 3
             for o in parsed["options"]:
                 assert o["goal"] in GOALS, "options 的 goal 必须落在闭集内"
+                assert o["goal"] != "comprehensive", "comprehensive 只用于第二步 replace"
             assert "code" not in parsed, "第一步方案卡不得含代码"
         else:
             assert parsed["kind"] == "replace"
@@ -114,6 +142,32 @@ def test_main_fewshots_optimization_samples_valid():
             assert "class Solution" in code
 
     assert sorted(set(kinds)) == ["options", "replace"]
+
+
+def test_fewshots_second_round_states_exclusions():
+    """第二步样例必须示范「白名单 + 黑名单」两种提问形态，且多方向记 comprehensive。
+
+    样例是 agent 实际模仿的锚点：只改引导不改样例，agent 仍会照旧样例把用户没勾的方向一起改。
+    """
+    replace_goals = []
+    for s in get_main_few_shots():
+        if "【编辑建议】" not in s:
+            continue
+        parsed = _extract_block_json(s)
+        if parsed["kind"] != "replace":
+            continue
+        replace_goals.append(parsed["goal"])
+        question = s.split("【编辑建议】")[0]
+        assert "只做" in question, "第二步样例的提问必须是「只做…」模板"
+        assert "不要顺带做其他方向的改动" in question or "只做以下方向" in question, (
+            "第二步样例必须示范黑名单（单方向）或多方向白名单"
+        )
+
+    assert "comprehensive" in replace_goals, "缺少多方向样例（goal=comprehensive）"
+    assert len([g for g in replace_goals if g != "comprehensive"]) >= 1, "缺少单方向样例"
+    # 单方向样例的黑名单必须与引导同款措辞
+    joined = "\n".join(get_main_few_shots())
+    assert "不要顺带做其他方向的改动（例如：" in joined
 
 
 def test_main_system_prompt_injects_optimization():

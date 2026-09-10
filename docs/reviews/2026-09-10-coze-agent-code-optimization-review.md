@@ -9,7 +9,18 @@
 
 实现与 spec/plan 一致，**双端全绿，可合并**；后端按设计零改动。三处计划外偏差（B3 多文件一律走快照、纯函数单测替代组件单测、优化卡 `v-if` 放宽）均已核对，**理由成立且优于原计划**，其中 `v-if` 放宽避开了一个必然触发的重挂陷阱。
 
-未发现阻断性问题。**两项值得在发布前处理**（R1 报错入口点击后无可见反馈；R2 多张优化卡依次撤销时的编辑器/右栏错配），其余为守卫强度与测试覆盖的加固建议。手验清单 8 条与 coze 侧重新发布仍待执行。
+未发现阻断性问题。**R1、R2 已在 review 后当日修复并提交**（前端 `80f3136`，详见下）；其余为守卫强度与测试覆盖的加固建议。手验清单 8 条与 coze 侧重新发布仍待执行。
+
+> **更新（2026-09-10 联调后）**：R1 已修（`prefillFix()` 追加 `store.navigateTo('tutor')`）、R2 已修（运行快照改为**卡片自持**：`applyCandidateRun` 返回快照，`restorePreviousRun(prev)` 显式入参，`previousRun` 单槽状态删除）。联调另发现两处新问题并已收敛为独立计划：
+> ① 方案卡**单选** + 提问用「以 X 为**优先**」（软措辞）导致「选的方向不约束产出」→ `docs/plan/2026-09-10-coze-agent-optimization-goal-binding-and-error-entry-fix-plan.md`（F1–F3，多选 + 硬约束 + 显式排除未选项）；
+> ② R1 只解决了「点了看不到反馈」，未解决「在别的页面看不到入口」→ 同计划 F4（入口搬到全局红色弹窗并常驻）。
+> 另新增功能计划：`docs/plan/2026-09-10-coze-agent-run-timeline-plan.md`（运行不清空对话 + 记录点回退）。
+
+> **更新（2026-09-10 计划执行后）**：上述两份计划已落地，本 review 的 R1/R2 由此闭环——
+> **问题 ② 是 R1 的加强版**（R1 只解决「点了看不到反馈」，本计划 F4 解决「在别的页面看不到入口」）：
+> 入口整体搬到常驻的全局红色弹窗（`GlobalStatus.vue`），控制台那份删除（单入口），并让**运行类**错误不再 6 秒自动消失。
+> 前端登录点从 `ConsoleOutput` 迁到 `GlobalStatus`，即 review 时所在的位置已不存在，R1 的修复点随代码一起删除了。
+> 实现记录见 `docs/devlog/2026-09-10-coze-agent-optimization-goal-binding-fix.md`。
 
 ## 验证（全绿）
 
@@ -49,14 +60,14 @@
 
 ## 发现的问题
 
-### R1（中）- 报错入口点击后无任何可见反馈，且草稿落在不可见面板
+### R1（中）- 报错入口点击后无任何可见反馈，且草稿落在不可见面板 —— ✅ 已修复（2026-09-10）
 
 - **位置**：`ConsoleOutput.vue` `prefillFix()`；`SingleFileShell.vue:89-92`、`MultiFileShell.vue:84-87` 的 pane 划分。
 - **现状**：`ConsoleOutput` 只在 `variables`（内存状态）pane 内渲染，而 agent 输入框在 `tutor`（Ask 组）pane —— 两个 pane 由互斥的 `v-show` 控制，**从不同时可见**。`prefillFix()` 只写 `store.chatDraft`，不切 tab、不聚焦（`input` 无 `ref`）。
 - **影响**：用户点「让 agent 帮我看看」后画面毫无变化（草稿其实已写入，切到 Ask 才看得见）→ 交互闭环断开，功能形同失效。多文件模式没有浮动面板，必定如此；单文件模式的浮动面板默认收起，同样如此。
 - **建议**：`prefillFix()` 末尾加一行 `store.navigateTo('tutor')`（该 action 已存在且两模式通用，见 `player.js:575`），或至少切到 agent 面板。spec §5 只规定了「只预填不发送」，未排除导航——补导航不违反「不替用户发送」。
 
-### R2（中）- 多张优化卡依次撤销时，编辑器与右栏/`store.code` 错配
+### R2（中）- 多张优化卡依次撤销时，编辑器与右栏/`store.code` 错配 —— ✅ 已修复（2026-09-10）
 
 - **位置**：`player.js:201-206 applyCandidateRun`（`previousRun` 为**单槽**）、`player.js:223 restorePreviousRun`、`OptimizationCard.vue:161/169/182`。
 - **现状**：`previousRun` 是 store 级单槽，每次 `applyCandidateRun` 覆写。卡片 A 应用后（`previousRun = A 前`）再应用卡片 B（`previousRun` 被覆写为 `B 前 ≈ A 后`）；此后撤销卡片 A 时，`undoToken_A` 已因 B 的 `executeEdits` 失效 → 走快照路径 → `restoreCode(snapshot_A = A 前的代码)` + `restorePreviousRun()`（回填的是 **A 之后**的 steps/code）。
@@ -85,7 +96,7 @@
 
 ## 建议
 
-- **R1 建议发布前处理**（一行修复，否则报错入口的交互闭环是断的）；**R2 建议同批处理**（改动小、后果是静默的上下文错配）。
+- ~~R1 / R2 建议发布前处理~~ → **均已修复**（`80f3136`）。R1 只覆盖了「点了看不到反馈」，未覆盖「在别的页面看不到入口」，后者由新计划 F4 接手。
 - R3 值得顺手做（守卫强度问题，成本约 10 行）；R4/R5 可选。
 - 不阻断合并。**发布前必做**：① `npm run dev` 手验 devlog §6 清单 1–8（尤其第 4 条撤销的两种路径、第 6 条报错入口「等 10 秒仍在」）；② coze 侧改动需**重新发布 agent** 才生效。
 

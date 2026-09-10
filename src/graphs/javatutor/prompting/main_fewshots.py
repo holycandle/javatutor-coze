@@ -19,7 +19,7 @@ _REPLACE_SAMPLE = json.dumps(
         "kind": "replace",
         "target": "Solution.java",
         "goal": "performance",
-        "rationale": "内层线性查找改为哈希表，整体由 O(n²) 降为 O(n)。",
+        "rationale": "只按所选方向：内层线性查找改为哈希表，整体由 O(n²) 降为 O(n)；未改动可读性相关的命名与结构。",
         "code": (
             "import java.util.*;\n"
             "\n"
@@ -27,6 +27,35 @@ _REPLACE_SAMPLE = json.dumps(
             "    public int[] solve(int[] nums) {\n"
             "        Map<Integer, Integer> seen = new HashMap<>();\n"
             "        for (int i = 0; i < nums.length; i++) seen.put(nums[i], i);\n"
+            "        return nums;\n"
+            "    }\n"
+            "}\n"
+        ),
+    },
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+
+# 多方向（用户在方案卡上勾了 2 项）的第二步：goal 记 comprehensive，rationale 分别说明各方向
+_REPLACE_MULTI_SAMPLE = json.dumps(
+    {
+        "kind": "replace",
+        "target": "Solution.java",
+        "goal": "comprehensive",
+        "rationale": "① 性能：内层线性查找改为哈希表，由 O(n²) 降为 O(n)；② 内存：改用左右边界索引，原地处理不新建数组。",
+        "code": (
+            "import java.util.*;\n"
+            "\n"
+            "public class Solution {\n"
+            "    public int[] solve(int[] nums) {\n"
+            "        int lo = 0, hi = nums.length - 1;\n"
+            "        Map<Integer, Integer> seen = new HashMap<>();\n"
+            "        while (lo <= hi) {\n"
+            "            seen.put(nums[lo], lo);\n"
+            "            if (lo != hi) seen.put(nums[hi], hi);\n"
+            "            lo++;\n"
+            "            hi--;\n"
+            "        }\n"
             "        return nums;\n"
             "    }\n"
             "}\n"
@@ -71,12 +100,21 @@ MAIN_FEW_SHOTS = [
     "② 变量命名较短、方法偏长，可读性有提升空间。请选择你更看重的方向。\n"
     "【编辑建议】\n"
     f"{_OPTIONS_SAMPLE}",
-    # 优化第二步：用户选定目标后才给整份代码（replace）
-    "【示例】问：（用户在上一步点选了「以性能为先」）以「性能」为优先优化当前代码，"
-    "具体要求：用哈希表把嵌套循环降为 O(n)。请给出优化后的完整代码。\n"
-    "答：把内层线性查找换成哈希表，整体由 O(n²) 降为 O(n)。\n"
+    # 优化第二步：用户选定目标后才给整份代码（replace）。提问是方案卡提交后的固定模板：
+    # 白名单（「只做…」）+ 黑名单（「不要顺带做…」）都在提问里，agent 只能照做。
+    "【示例】问：只做「以性能为先」方向的优化，具体要求：用哈希表把嵌套循环降为 O(n)。"
+    "不要顺带做其他方向的改动（例如：「以可读性为先」：拆分长方法并命名中间变量）。"
+    "请给出优化后的完整代码。\n"
+    "答：把内层线性查找换成哈希表，整体由 O(n²) 降为 O(n)，命名与结构保持原样。\n"
     "【编辑建议】\n"
     f"{_REPLACE_SAMPLE}",
+    # 优化第二步（多方向）：用户在方案卡上勾了 ≥2 项 → goal 记 comprehensive，rationale 逐项说明
+    "【示例】问：（用户在上一步勾选了两个方向）只做以下方向的优化："
+    "①「以性能为先」：用哈希表把嵌套循环降为 O(n)；②「以空间优化为先」：用左右边界索引限定原数组范围。"
+    "请给出优化后的完整代码。\n"
+    "答：① 性能：内层线性查找改为哈希表，由 O(n²) 降为 O(n)；② 内存：改用左右边界索引，原地处理不新建数组。\n"
+    "【编辑建议】\n"
+    f"{_REPLACE_MULTI_SAMPLE}",
 ]
 
 
