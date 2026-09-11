@@ -91,21 +91,40 @@ def critic_node(state, model=None) -> dict[str, Any]:
         return {"critic_passed": True, "critic_feedback": "", "critic_skipped": True}
 
 
+_EDIT_SUGGESTION_MARKER = "【编辑建议】"
+
+
+def _split_edit_block(answer: str) -> tuple[str, str]:
+    """把【编辑建议】块从回答末尾拆出，返回 (正文, 编辑块)。
+
+    编辑建议块是前端机械应用（Monaco executeEdits）的契约数据；
+    修订节点用「不要 JSON」的提示词重写回答时会把它丢掉，这里先拆出暂存。
+    """
+    idx = answer.find(_EDIT_SUGGESTION_MARKER)
+    if idx == -1:
+        return answer, ""
+    return answer[:idx].rstrip(), answer[idx:].strip()
+
+
 def revise_node(state, model=None) -> dict[str, Any]:
     answer = state.get("answer") or ""
     if state.get("critic_passed") or state.get("revised"):
         return {"revised_answer": answer, "revised": False, "revise_skipped": False}
+    # 编辑建议块不参与「不要 JSON」的重写：拆出暂存，修订后原样拼回，确保前端始终收到。
+    body, edit_block = _split_edit_block(answer)
     messages = [
         SystemMessage(content=SYSTEM_PROMPT_REVISE),
         HumanMessage(
             content=(
-                f"原回答：\n{answer}\n\n评审意见：\n{state.get('critic_feedback', '')}\n\n"
+                f"原回答：\n{body}\n\n评审意见：\n{state.get('critic_feedback', '')}\n\n"
                 f"事实依据：\n{_facts(state)}"
             )
         ),
     ]
     try:
         raw = _invoke(messages, model).content
+        if edit_block:
+            raw = raw.rstrip() + "\n\n" + edit_block
         return {"revised_answer": raw, "revised": True, "revise_skipped": False}
     except Exception:
         return {"revised_answer": answer, "revised": False, "revise_skipped": True}
