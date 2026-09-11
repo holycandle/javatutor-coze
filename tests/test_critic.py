@@ -51,6 +51,30 @@ def test_revise_returns_revised():
     assert out["revised_answer"] == "根据第 2 步，arr[1] 变成了 5"
 
 
+def test_revise_preserves_edit_suggestion_block():
+    state = {
+        **BASE,
+        "answer": (
+            "问题出在循环越界。\n\n"
+            "【编辑建议】\n"
+            '{"edits":[{"title":"修正循环条件","old_string":"i <= arr.length",'
+            '"new_string":"i < arr.length","explanation":"避免越界"}]}'
+        ),
+        "critic_feedback": "[\"变量值 8 与数据不符\"]",
+    }
+    # 修订 LLM 只回正文（“不要 JSON”），不带编辑建议块
+    out = revise_node(state, FakeModel("已修正的正文"))
+    assert out["revised"] is True
+    assert "已修正的正文" in out["revised_answer"]
+    assert "【编辑建议】" in out["revised_answer"]
+    assert '"edits"' in out["revised_answer"]
+
+
+def test_revise_without_edit_block_keeps_prose_only():
+    out = revise_node(BASE, FakeModel("修订后的回答"))
+    assert out["revised_answer"] == "修订后的回答"
+
+
 def test_facts_include_heap_stack_output():
     state = {
         **BASE,

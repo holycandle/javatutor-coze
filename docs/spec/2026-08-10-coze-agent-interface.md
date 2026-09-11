@@ -64,6 +64,38 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
 - 无可用面板时整块省略；最多一个 `【视角导航】` 块/条回答。
 - 前端按“`【决策痕迹】` 之前、`【视角导航】`/`【编辑建议】` 之后的正文”渲染，三个结构化块均不落入 markdown 正文。
 
+## 2.2 编辑建议块（回答中附带，可选）
+
+主 Agent 可在回答末尾（`【视角导航】`/`【决策痕迹】` 之前）附带一个 `【编辑建议】` 块，前端渲染为卡片并经
+用户点击后改动编辑器代码。顶层 `kind` 字段区分三种载荷（缺省为 `patch`，**向后兼容**）：
+
+| kind | 用途 | 载荷 |
+|---|---|---|
+| `patch`（缺省） | 局部替换 | `{"edits":[{"title","explanation","old_string","new_string"}]}` |
+| `options` | **方案卡**：候选优化目标（不含代码） | `{"kind":"options","target":"...","options":[{"goal","label","detail"}]}` |
+| `replace` | **整文件覆盖** | `{"kind":"replace","target":"...","goal":"...","rationale":"...","code":"<整份新代码>"}` |
+
+```text
+正文...
+
+【编辑建议】
+{"kind":"options","target":"Solution.java","options":[{"goal":"performance","label":"以性能为先","detail":"用哈希表把嵌套循环降为 O(n)"}]}
+```
+
+约定：
+
+- 放置顺序：正文 → `【编辑建议】`（如有）→ `【视角导航】`（如有）→ `【决策痕迹】`；与正文空一行分隔。
+- **每答最多一个 `【编辑建议】` 块**；`options` 与 `replace` 不同时出现。
+- 代码优化走**两步式**：第一轮只给 `options`（2–3 项，`goal` 取闭集
+  `performance|readability|memory|style|correctness|comprehensive`，块内不得含代码，且方案卡**不得**产出 `comprehensive`）；
+  用户在方案卡上勾选（可多选）后，前端按模板发新一轮提问（白名单「只做…」+ 黑名单「不要顺带做其他方向的改动（例如：…）」），
+  第二轮才给 `replace` 的**完整可编译**整份代码——`goal` 单方向时为该方向、**多方向（勾 ≥2）时为 `comprehensive`**（`rationale` 逐项说明），
+  且代码只许改动所选方向。
+- `goal` 闭集与提问模板详见 [2026-09-10-coze-agent-code-optimization.md](./2026-09-10-coze-agent-code-optimization.md) §4.4。
+- `target` 为文件名：多文件模式必填，单文件模式缺省为当前文件。
+- 取值非法 / `code` 为空 / `options` 为空 → 整块按正文展示（不静默丢弃、不崩），前端不出卡。
+- 完整规格见 [2026-09-10-coze-agent-code-optimization.md](./2026-09-10-coze-agent-code-optimization.md)。
+
 ## 3. 决策痕迹 Schema
 
 ```json

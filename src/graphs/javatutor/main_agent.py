@@ -13,6 +13,7 @@ from graphs.javatutor.prompting.panels import (
     render_usage_guide,
 )
 from graphs.javatutor.prompting.main_fewshots import get_main_few_shots
+from graphs.javatutor.prompting.optimization import render_optimization_guidance
 from tools.fetch_execution_context import fetch_execution_context
 from tools.step_facts import step_facts
 
@@ -20,11 +21,11 @@ MAX_ROUNDS = 3
 
 
 def _main_system_prompt() -> str:
-    """主 Agent 系统提示 = 模板 + 运行时注入的视角导航引导 / 算法知识目录 / 使用流程指南 / few-shot（随 manifest 联动）。"""
+    """主 Agent 系统提示 = 模板 + 运行时注入的导航引导 / 算法目录 / 使用指南 / 优化引导 / 面板图 / few-shot（随 manifest 联动）。"""
     few = "\n\n".join(get_main_few_shots())
     return (
         f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_algo_catalog()}\n\n"
-        f"{render_usage_guide()}\n\n{render_ui_map()}\n\n## 回答示例\n{few}"
+        f"{render_usage_guide()}\n\n{render_optimization_guidance()}\n\n{render_ui_map()}\n\n## 回答示例\n{few}"
     )
 
 
