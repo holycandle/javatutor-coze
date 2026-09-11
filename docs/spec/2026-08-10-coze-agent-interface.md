@@ -45,26 +45,56 @@
 - 前端按“最后一个 `【决策痕迹】` 标记之后的内容”提取 JSON，其余全部视为正文。
 - 无痕迹时（如 analyze 返回纯 JSON、动画返回 SVG），正文就是完整消息，前端不强制解析。
 
-## 2.5 编辑建议块（【编辑建议】）
+## 2.1 视角导航块（回答中附带，可选）
 
-当回答包含对用户当前代码的具体修改建议时，模型在正文之后、`【决策痕迹】` 之前追加编辑建议块：
+主 Agent 在回答末尾（`【决策痕迹】` 之前）可附带一个结构化导航指令块，供前端渲染成可点击卡片，让用户一键跳到
+JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.md](./2026-09-07-coze-agent-view-navigation.md)。
 
 ```text
-正文回答...
+正文...
 
-【编辑建议】
-{"edits":[{"title":"修复越界","old_string":"for (int i = 0; i <= n; i++)","new_string":"for (int i = 0; i < n; i++)","explanation":"i == n 时 arr[i] 越界"}]}
-
-【决策痕迹】
-{...}
+【视角导航】
+{"views":[{"panel":"tutor","sub":"analysis","label":"分析"}]}
 ```
 
 约定：
 
-- `old_string` 逐字摘自请求的 `source_code`（含缩进），且在源码中唯一出现；多个 edit 的区间不重叠。
-- 前端解析规则：先按「最后一个 `【决策痕迹】`」剥离痕迹块，再按「最后一个 `【编辑建议】`」提取 JSON；JSON 解析失败或字段缺失时，整块按正文展示，不报错。
-- 前端应用时以 `old_string` 在当前编辑器文本中重新定位（用户可能在收到建议后改过代码）：0 次匹配 / 多次匹配 / 区间重叠的 edit 跳过并标注原因。
-- 该块由模型作为正文一部分输出，图侧 `build_final` 不感知、不处理。
+- 固定以单独一行 `【视角导航】` 开头，其后一行是 JSON。
+- `views` 最多 3 项；`panel` 为面板白名单 id、`sub` 仅供 `tutor`（`analysis`|`explain`）、`label` 缺省为面板规范名。
+- 无可用面板时整块省略；最多一个 `【视角导航】` 块/条回答。
+- 前端按“`【决策痕迹】` 之前、`【视角导航】`/`【编辑建议】` 之后的正文”渲染，三个结构化块均不落入 markdown 正文。
+
+## 2.2 编辑建议块（回答中附带，可选）
+
+主 Agent 可在回答末尾（`【视角导航】`/`【决策痕迹】` 之前）附带一个 `【编辑建议】` 块，前端渲染为卡片并经
+用户点击后改动编辑器代码。顶层 `kind` 字段区分三种载荷（缺省为 `patch`，**向后兼容**）：
+
+| kind | 用途 | 载荷 |
+|---|---|---|
+| `patch`（缺省） | 局部替换 | `{"edits":[{"title","explanation","old_string","new_string"}]}` |
+| `options` | **方案卡**：候选优化目标（不含代码） | `{"kind":"options","target":"...","options":[{"goal","label","detail"}]}` |
+| `replace` | **整文件覆盖** | `{"kind":"replace","target":"...","goal":"...","rationale":"...","code":"<整份新代码>"}` |
+
+```text
+正文...
+
+【编辑建议】
+{"kind":"options","target":"Solution.java","options":[{"goal":"performance","label":"以性能为先","detail":"用哈希表把嵌套循环降为 O(n)"}]}
+```
+
+约定：
+
+- 放置顺序：正文 → `【编辑建议】`（如有）→ `【视角导航】`（如有）→ `【决策痕迹】`；与正文空一行分隔。
+- **每答最多一个 `【编辑建议】` 块**；`options` 与 `replace` 不同时出现。
+- 代码优化走**两步式**：第一轮只给 `options`（2–3 项，`goal` 取闭集
+  `performance|readability|memory|style|correctness|comprehensive`，块内不得含代码，且方案卡**不得**产出 `comprehensive`）；
+  用户在方案卡上勾选（可多选）后，前端按模板发新一轮提问（白名单「只做…」+ 黑名单「不要顺带做其他方向的改动（例如：…）」），
+  第二轮才给 `replace` 的**完整可编译**整份代码——`goal` 单方向时为该方向、**多方向（勾 ≥2）时为 `comprehensive`**（`rationale` 逐项说明），
+  且代码只许改动所选方向。
+- `goal` 闭集与提问模板详见 [2026-09-10-coze-agent-code-optimization.md](./2026-09-10-coze-agent-code-optimization.md) §4.4。
+- `target` 为文件名：多文件模式必填，单文件模式缺省为当前文件。
+- 取值非法 / `code` 为空 / `options` 为空 → 整块按正文展示（不静默丢弃、不崩），前端不出卡。
+- 完整规格见 [2026-09-10-coze-agent-code-optimization.md](./2026-09-10-coze-agent-code-optimization.md)。
 
 ## 3. 决策痕迹 Schema
 

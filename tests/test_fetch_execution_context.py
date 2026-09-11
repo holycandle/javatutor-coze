@@ -1,90 +1,148 @@
-from tools.fetch_execution_context import fetch_execution_context
+from tools.fetch_execution_context import fetch_execution_context, normalize_files
 
 
-class FakeResponse:
-    status_code = 200
-
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-def _success_payload():
-    return {
-        "run_id": "run-1",
-        "source_code": "public class A { int x = 1; }",
-        "steps": [
-            {"step": 0, "line": 1, "variables": {"x": 1}},
-            {"step": 1, "line": 1, "variables": {"x": 2}},
-        ],
-        "current_step_index": 1,
+def test_fetch_prefers_state_and_stores_fetched_context():
+    state = {
+        "run_id": "r1",
+        "source_code": "public class A {}\npublic class B {}",
+        "steps": [{"step_index": 0, "variables": {"x": 1}}],
+        "current_step_index": 0,
         "current_line": 1,
-        "compile_error": "",
-        "algorithm_tags": ["遍历"],
-        "expires_at": 1784736000,
     }
+    out = fetch_execution_context(state)
+    assert out["source_code"] == state["source_code"]
+    assert out["steps_count"] == 1
+    assert out["fetched_context"]["source_code"] == state["source_code"]
+    assert out["fetched_context"]["run_id"] == "r1"
+    assert out["stored"] is True
 
 
-def test_fetch_success_populates_state(monkeypatch):
-    captured = {}
-
-    def fake_get(url, headers, timeout):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["timeout"] = timeout
-        return FakeResponse(_success_payload())
-
-    monkeypatch.setattr("tools.fetch_execution_context.httpx.get", fake_get)
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-
-    assert captured["url"] == "http://localhost:8080/api/agent/execution-context/run-1"
-    assert captured["headers"]["X-Agent-Token"] == "secret-token"
-    assert out["source_code"] == "public class A { int x = 1; }"
-    assert out["current_step_index"] == 1
-    assert out["current_variables"] == {"x": 2}
-    assert out["fetch_context_failed"] is False
-    assert out["run_context_memory"]["run_id"] == "run-1"
-    assert "source_code" not in out["run_context_memory"]
-    assert "steps" not in out["run_context_memory"]
+def test_fetch_no_source_or_steps_returns_error():
+    out = fetch_execution_context({"run_id": "", "source_code": "", "steps": []})
+    assert out.get("fetch_context_failed") is True
+    assert out.get("error")
 
 
-def test_fetch_non_200_returns_failure(monkeypatch):
-    class ErrorResponse:
-        status_code = 404
+def test_fetch_schema_has_file_and_line_params():
+    from tools.fetch_execution_context import TOOL_SCHEMA
 
-        def json(self):
-            return {}
-
-    monkeypatch.setattr("tools.fetch_execution_context.httpx.get", lambda url, headers, timeout: ErrorResponse())
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
-    assert "404" in out["fetch_context_error"]
-    assert out["fallback_reason"].startswith("fetch_execution_context failed:")
+    props = TOOL_SCHEMA["parameters"]["properties"]
+    for k in ("run_id", "file", "start_line", "end_line"):
+        assert k in props
 
 
-def test_fetch_missing_required_fields_returns_failure(monkeypatch):
-    monkeypatch.setattr(
-        "tools.fetch_execution_context.httpx.get",
-        lambda url, headers, timeout: FakeResponse({"run_id": "run-1"}),
-    )
-    monkeypatch.setenv("JAVATUTOR_EXECUTION_CONTEXT_URL", "http://localhost:8080/api/agent/execution-context")
-    monkeypatch.setenv("JAVATUTOR_AGENT_TOKEN", "secret-token")
-
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
+def test_fetch_slices_code_by_line_range():
+    state = {"run_id": "r1", "source_code": "line1\nline2\nline3\nline4", "steps": []}
+    out = fetch_execution_context(state, start_line=2, end_line=3)
+    assert out["code"] == "line2\nline3"
 
 
-def test_fetch_missing_env_config_returns_failure(monkeypatch):
-    """URL 或 token 未配置时返回失败，而非抛异常."""
-    monkeypatch.delenv("JAVATUTOR_EXECUTION_CONTEXT_URL", raising=False)
-    monkeypatch.delenv("JAVATUTOR_AGENT_TOKEN", raising=False)
-    out = fetch_execution_context({}, "run-1")
-    assert out["fetch_context_failed"] is True
+def test_fetch_does_not_import_httpx_or_os():
+    import importlib
+    import sys
+
+    sys.modules.pop("tools.fetch_execution_context", None)
+    mod = importlib.import_module("tools.fetch_execution_context")
+    assert not hasattr(mod, "httpx")
+    assert not hasattr(mod, "os")
+
+
+def test_fetch_sets_compact_run_context_memory_without_code_or_steps():
+    state = {
+        "run_id": "r1",
+        "source_code": "code",
+        "steps": [{}],
+        "current_step_index": 0,
+        "current_line": 1,
+    }
+    out = fetch_execution_context(state)
+    rcm = out["run_context_memory"]
+    assert "source_code" not in rcm and "steps" not in rcm
+    assert rcm["steps_count"] == 1
+
+
+def test_file_param_reads_from_state_files():
+    state = {
+        "source_code": "class Main {}",
+        "files": {"A.java": "class A {}", "B.java": "class B {}"},
+        "steps": [],
+        "run_id": "r1",
+    }
+    r = fetch_execution_context(state, file="B.java")
+    assert r["code"] == "class B {}"
+    assert r["file"] == "B.java"
+    assert "B.java" in r["fetched_context"]["project_files"]
+    assert r["run_context_memory"]["files_count"] == 2
+
+
+def test_file_param_case_insensitive_basename():
+    state = {"source_code": "", "files": {"src/App.java": "class App {}"}, "steps": []}
+    r = fetch_execution_context(state, file="app.java")  # 忽略大小写/basename
+    assert r["code"] == "class App {}"
+
+
+def test_file_param_not_found_returns_error():
+    state = {"source_code": "", "files": {"A.java": "..."}, "steps": []}
+    r = fetch_execution_context(state, file="Nope.java")
+    assert r.get("error") and r.get("fetch_context_failed") is True
+    assert "Nope.java" in r["error"]
+
+
+def test_default_reads_main_entry():
+    state = {"source_code": "class Main {}", "files": {"A.java": "..."}, "steps": []}
+    r = fetch_execution_context(state)
+    assert r["code"] == "class Main {}"
+    assert r["file"] == ""
+
+
+def test_default_prefers_entry_file():
+    state = {
+        "source_code": "class Active {}",
+        "entry_file": "App.java",
+        "files": {"App.java": "class App {}", "B.java": "..."},
+        "steps": [],
+    }
+    r = fetch_execution_context(state)
+    assert r["code"] == "class App {}"
+    assert r["file"] == "App.java"  # 默认读 entry_file，而非激活文件
+
+
+def test_current_step_file_propagated():
+    state = {
+        "source_code": "class Main {}",
+        "steps": [{"step": 0, "file": "Other.java", "variables": {}}],
+        "current_step_index": 0,
+        "files": {"Other.java": "class Other {}", "Main.java": "..."},
+    }
+    r = fetch_execution_context(state)
+    assert r["current_step_file"] == "Other.java"
+    assert r["fetched_context"]["current_step_file"] == "Other.java"
+
+
+def test_normalize_files_variants():
+    assert normalize_files({"A.java": "c"}) == {"A.java": "c"}
+    assert normalize_files([{"name": "B.java", "code": "c"}]) == {"B.java": "c"}
+    assert normalize_files([{"path": "C.java", "code": "c"}]) == {"C.java": "c"}
+    assert normalize_files(None) == {}
+    assert normalize_files([{"name": "D.java"}]) == {}
+
+
+def test_single_file_file_param_falls_back_to_source_code():
+    """单文件（files 为空）时，即便 agent 传 file=Main.java 也应回退 source_code，而非报错。"""
+    state = {
+        "source_code": "class MaxSubarray {\n  public static void main(String[] a) {}\n}",
+        "steps": [],
+        "files": {},
+    }
+    r = fetch_execution_context(state, file="Main.java")
+    assert r["code"] == state["source_code"]
+    assert not r.get("error")  # 成功回退，未报文件不存在
+    assert r["file"] == "Main.java"
+    assert r["fetch_context_failed"] is False
+
+
+def test_no_http_env_dependency_in_tool_module():
+    import tools.fetch_execution_context as mod
+
+    assert not hasattr(mod, "httpx")
+    assert not hasattr(mod, "os")  # 维持 Phase 1「无环境依赖」约定（basename 用 rsplit 实现）

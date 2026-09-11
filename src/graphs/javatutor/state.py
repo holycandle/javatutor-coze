@@ -143,3 +143,18 @@ class JavaTutorState(TypedDict, total=False):
 
     run_context_memory: dict
     """本轮运行上下文的紧凑摘要，禁止保存完整 source_code 与 steps."""
+
+    fetched_context: dict
+    """读取工具暂存的执行上下文快照：run_id / source_code / steps / current_step_index /
+    current_line / compile_error / algorithm_tags / code_hash / fetched_at / fetch_context_latency_ms."""
+
+    files: dict[str, str]
+    """项目全部文件：文件名 -> 源码。来自入站 payload 的 files，经 normalize_files 归一化。
+
+    source_code 仍是行号映射锚点（由 entry_file 锚定，缺省为激活文件）；files 供 agent 按需读取其他文件。"""
+
+    entry_file: str
+    """主入口文件名（可选）。存在时 fetch_execution_context 无 file 参数时默认读该文件；行号锚点=该文件。"""
+
+    current_step_file: str
+    """当前步（steps[current_step_index]）所在文件，来自该 step 的 file 字段。供 agent 自证「当前步在哪个文件」，step_facts 据此对齐。"""

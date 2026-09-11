@@ -276,10 +276,11 @@ wheels = [
 
 [[package]]
 name = "coze-coding-dev-sdk"
-version = "0.5.19"
+version = "0.5.22"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 dependencies = [
     { name = "alembic" },
+    { name = "beautifulsoup4" },
     { name = "boto3" },
     { name = "click" },
     { name = "coze-coding-utils" },
@@ -291,10 +292,14 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres" },
     { name = "markdown" },
+    { name = "numpy" },
+    { name = "openpyxl" },
+    { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic" },
     { name = "python-docx" },
+    { name = "python-pptx" },
     { name = "reportlab" },
     { name = "requests" },
     { name = "rich" },
@@ -303,9 +308,9 @@ dependencies = [
     { name = "supabase" },
     { name = "unidecode" },
 ]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/6a/14/6e1c64256038b45dde451c8240706bd29e807c10e8670a2a7692f51e803c/coze_coding_dev_sdk-0.5.19.tar.gz", hash = "sha256:1f6142ae0953df9c8904b78c63ec0a070c3d74a5401bc728ca403a8ee76f6c36" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/95/62/bd7f3b88a45cbac1f2be0551221e1661a2c5634cf2ac3dd13260ccc9c54c/coze_coding_dev_sdk-0.5.22.tar.gz", hash = "sha256:4406d98d5260cb75a0818c57343c9d7b4f293992a30f9225f9b789fa5f341828" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/12/4b/8815b5c0a728ee05c760234e48d958e4b29f5302c2cd335f7779df25991d/coze_coding_dev_sdk-0.5.19-py3-none-any.whl", hash = "sha256:27476bde081267178cb4e602d8e1055f8e86fc64d686968aba86c277e2ea32fc" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/1c/13/12174e8ee2b83410aad7c79c3c5b41ad9d3b445a57a307efb7581d0c44ad/coze_coding_dev_sdk-0.5.22-py3-none-any.whl", hash = "sha256:644c2ebc35f23c756140815f3449ae6ad4528fb28562c74b280b45e8e0bb759a" },
 ]
 
 [[package]]
@@ -2744,7 +2749,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "boto3", specifier = ">=1.40,<2" },
     { name = "chardet", specifier = ">=5.2,<6" },
-    { name = "coze-coding-dev-sdk", specifier = ">=0.5.19" },
+    { name = "coze-coding-dev-sdk", specifier = ">=0.5.22" },
     { name = "coze-coding-utils", specifier = ">=0.2.8" },
     { name = "coze-workload-identity", specifier = ">=0.1.4,<1" },
     { name = "cozeloop", specifier = ">=0.1.25,<1" },

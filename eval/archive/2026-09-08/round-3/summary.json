@@ -1,0 +1,50 @@
+{
+  "e2e": {
+    "avg_score": 3.0403,
+    "grounding_avg": 2.5161,
+    "total": 31,
+    "correct": 9,
+    "partially_correct": 14,
+    "incorrect": 8,
+    "judge_fallback_rate": 0.0,
+    "empty_output_rate": 0.0,
+    "tool_call_accuracy": 0.8065,
+    "task_success_rate": 0.1935,
+    "avg_latency": 19.83,
+    "avg_token_usage": 3207.9,
+    "token_usage_sample_count": 29,
+    "grounding_verify_applicable": 17,
+    "grounding_verify_checked": 44,
+    "grounding_verify_violations": 3,
+    "grounding_verify_accuracy": 0.8235,
+    "tool_call_by_tool": {
+      "fetch_execution_context": {
+        "expected": 16,
+        "called": 15,
+        "correct": 13,
+        "accuracy": 0.8125,
+        "unexpected": 1
+      },
+      "step_facts": {
+        "expected": 16,
+        "called": 14,
+        "correct": 12,
+        "accuracy": 0.75,
+        "unexpected": 1
+      }
+    }
+  },
+  "component": {},
+  "diff_vs_previous": {
+    "avg_score": 0.0403,
+    "grounding_avg": 0.1935,
+    "component_pass_rate": 0
+  },
+  "changes": {
+    "since": "2026-09-06 round-2",
+    "agent_changes": [
+      "2026-09-08 开发日志：提高 fetch_execution_context 调用率（2026-09-08）"
+    ],
+    "eval_changes": []
+  }
+}

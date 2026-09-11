@@ -165,7 +165,7 @@ def judge_complete(messages, temperature: float = 0.1) -> str:
         "model": model,
         "messages": _messages_to_openai(messages),
         "temperature": temperature,
-        "max_tokens": 500,
+        "max_tokens": 4000,
         "stream": False,
     }
 
@@ -175,7 +175,7 @@ def judge_complete(messages, temperature: float = 0.1) -> str:
     ]
     for response_format in response_formats:
         payload = {**base_payload, "response_format": response_format}
-        resp = httpx.post(f"{api_url}/chat/completions", json=payload, headers=headers, timeout=60)
+        resp = httpx.post(f"{api_url}/chat/completions", json=payload, headers=headers, timeout=180)
         if response_format["type"] == "json_schema" and 400 <= resp.status_code < 500:
             # 端点不支持 json_schema，回退 json_object 重试
             logger.warning("json_schema 不被端点支持（HTTP %s），回退 json_object", resp.status_code)

@@ -128,6 +128,21 @@ def build_facts_block(state: dict[str, Any]) -> str:
     ]
     if state.get("has_steps"):
         lines.append(_step_snapshot(state))
+    # 主 Agent 工具循环查到的单步证据（step_facts 结果），供评审核对非当前步的引用。
+    # 若无此块，评审只能看到当前步快照，会误判“第 N 步不存在”而改坏关于其他步骤的回答。
+    memories = state.get("step_memories") or []
+    if memories:
+        lines.append("\n### 已查询的步骤证据（step_facts）")
+        for m in memories[-5:]:
+            # step_index 是 0-based；统一用 1-based 展示序（与学生/回答的「第 N 步」一致），
+            # 并保留 0-based 提示，避免评审把「第 6 步」误判为独立于「第 7 步」的另一个步骤。
+            idx = m.get("step_index")
+            try:
+                display = int(idx) + 1
+                hint = f"（step_index={int(idx)}）"
+            except (TypeError, ValueError):
+                display, hint = "?", ""
+            lines.append(f"- 第 {display} 步{hint}: {m.get('content', '')[:600]}")
     method = _method_context(state)
     if method:
         lines.append("\n### 方法上下文\n" + method)

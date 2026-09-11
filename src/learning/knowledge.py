@@ -64,6 +64,8 @@ def _db_url() -> str:
 def ensure_schema(url: str | None = None) -> None:
     with psycopg.connect(url or _db_url(), autocommit=True) as conn:
         with conn.cursor() as cur:
+            # 新库需先启用 pgvector 扩展，否则建表时报 type "vector" does not exist
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS knowledge_chunks ("
                 "id BIGSERIAL PRIMARY KEY, source TEXT NOT NULL, chunk_index INT NOT NULL, "
@@ -136,13 +138,16 @@ def search_chunks(
     embedder: Callable = embed_texts,
     fetcher: Callable = _fetch_similar,
 ) -> list[dict[str, Any]]:
+    """检索知识分块；embedding / 查询失败时向调用方抛出异常（而非吞掉）。
+
+    之前内部 try/except 吞掉了 Coze EmbeddingClient 与 pgvector 的后端失败并返回 [],
+    导致 retrieve_knowledge 的 except 分支（rag_degraded=True）永远不触发，
+    RAG 故障被静默掩盖。改为向上抛出，让 graph 节点能正确置降级标志并记录到决策痕迹。
+    """
     if not query.strip():
         return []
-    try:
-        vector = embedder([query])[0]
-        rows = fetcher(vector, top_k)
-    except Exception:
-        return []
+    vector = embedder([query])[0]
+    rows = fetcher(vector, top_k)
     return [
         {"source": row[0], "chunk_index": row[1], "content": row[2], "score": round(float(row[3]), 4)}
         for row in rows
