@@ -59,6 +59,23 @@ def _basename(path: str) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def match_file_key(files: dict, file) -> str | None:
+    """在 ``files`` 中按「精确 → 忽略大小写 → basename（忽略大小写）」匹配文件名。
+
+    未命中返回 ``None``。运行时治理门闩（``harness/guard.py`` 的 P4）与本工具共用这一份口径，
+    避免出现「门闩认为歧义、工具却能解析」这类分叉。
+    """
+    if not file:
+        return None
+    if file in files:
+        return file
+    lower_input = _basename(str(file)).lower()
+    for name in files:
+        if name.lower() == str(file).lower() or _basename(name).lower() == lower_input:
+            return name
+    return None
+
+
 def _current_variables(steps: list[dict], current_step_index: int) -> dict:
     try:
         idx = int(current_step_index)
@@ -89,15 +106,7 @@ def _resolve_code(state: dict, file=None) -> tuple[str, str, dict]:
     """
     files = state.get("files") or {}
     if file:
-        key = None
-        if file in files:
-            key = file
-        else:
-            lower_input = _basename(str(file)).lower()
-            for name in files:
-                if name.lower() == str(file).lower() or _basename(name).lower() == lower_input:
-                    key = name
-                    break
+        key = match_file_key(files, file)
         if key is None:
             # 单文件（files 为空）→ 该 file 即主入口，回退 source_code；多文件未命中才报错。
             if not files and state.get("source_code"):

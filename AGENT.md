@@ -21,6 +21,8 @@
 | 执行上下文拉取 plan | 已执行 |
 | 执行上下文作为工具 spec | 已执行 |
 | 执行上下文作为工具 plan | 已执行 |
+| Harness 工程 spec（图内真环 + 治理门闩 + HITL 内核） | 已定稿 |
+| Harness 工程 plan | 已执行 |
 
 ## 规约与文档索引
 
@@ -68,6 +70,10 @@
 | 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 | 非当前步证据标签修复 | `docs/devlog/2026-09-02-step-facts-non-current-step-file.md` | 评审核对证据的 0/1-based 标签错配，单文件查非当前步（190 passed） |
 | fetch 调用率提升 | `docs/devlog/2026-09-08-raise-fetch-tool-call-rate.md` | step_facts 前置自动 fetch + 提示词强化，修复 round-2 分数下降（205 passed） |
+| Harness 工程设计 | `docs/spec/2026-09-11-agent-harness-react-loop-design.md` | 图内真环 propose→guard→tools、统一动作契约、治理门闩（allow/deny/needs_decision）、收束轮、HITL 内核、grounding 接入运行时 |
+| Harness 工程计划 | `docs/plan/2026-09-11-agent-harness-react-loop-plan.md` | 上述设计的 TDD 实施计划（含 test_main_agent.py 迁移表、终止性预算、外壳改造请求清单） |
+| Harness 工程实现 | `docs/devlog/2026-09-11-agent-harness-react-loop.md` | 图内真环 propose→guard→tools + 治理门闩 P0–P5 + HITL 内核 + grounding 接入运行时（311 passed，4 处计划偏差，review 5 项已修） |
+| Harness 工程 review | `docs/reviews/2026-09-11-agent-harness-react-loop-review.md` | 执行审查（1 P1 红线偏离 / 1 P2 HITL 末轮 / 3 P3；L1–L5 已复现）；**5 项全部已修复**，P1-1 采纳「保留行为 + 改 spec §5.1」、P2-1 改为 `P4-resolved` |
 
 ## 文档规范
 

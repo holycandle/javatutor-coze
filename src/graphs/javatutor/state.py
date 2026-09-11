@@ -158,3 +158,30 @@ class JavaTutorState(TypedDict, total=False):
 
     current_step_file: str
     """当前步（steps[current_step_index]）所在文件，来自该 step 的 file 字段。供 agent 自证「当前步在哪个文件」，step_facts 据此对齐。"""
+
+    # === Harness：图内真环（提案 / 治理 / 执行 / 客观核对）===
+    agent_messages: list[AnyMessage]
+    """主 Agent 循环的**累积**消息序列（System/Human/AI/Human...），构成真 ReAct 轨迹。
+
+    与 ``messages`` 分开：``messages`` 是入站契约（parse_context 读其最后一条，
+    平台 stream_mode="messages" 与它耦合），不能被循环过程污染。"""
+
+    proposed_action: dict
+    """propose 节点产出的提案（Action 的 dict 形态：tool / args / raw，或 parse_error）。
+
+    存 dict 而非 dataclass：状态要能进 checkpointer 的 checkpoint。"""
+
+    guard_decision: dict
+    """最近一次门闩裁决（verdict / policy / reason / options）。"""
+
+    step_records: list
+    """逐动作的 Observation 记录（原则⑦的 StepRecord），供决策痕迹、评测与 B 端可观测。"""
+
+    served_step_indices: list
+    """本请求内已成功查询过的 step_index（0-based），供门闩 P5 判重复查询。"""
+
+    fetched_injected: bool
+    """本请求是否已把执行上下文读进 state（自动前置 fetch 或模型显式 fetch 都会置位）。"""
+
+    verification: dict
+    """verify 节点的确定性 grounding 核对结果：applicable / checked / violations / hallucinated 等。"""
