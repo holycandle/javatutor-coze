@@ -129,6 +129,26 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
                 metadata={"section": "Evidence"},
             )
         )
+    # 运行模式：事实由前端随提问送来（后端透传）。缺失（旧客户端）⇒ 不注入，零行为变化。
+    # 同一事实只渲染一次：packet 说值，系统提示的「运行模式判读」段说规则，互不重复。
+    run_mode = state.get("run_mode") or ""
+    if run_mode:
+        n = int(state.get("test_case_count") or 0)
+        label = (
+            f"测试模式（已保存用例 {n} 条）"
+            if run_mode == "test"
+            else f"默认模式（测试模式未激活：已保存用例 {n} 条）"
+        )
+        packets.append(
+            ContextPacket(
+                "### 运行模式\n"
+                f"- 本次运行提交给后端的模式：{label}\n"
+                "- 「找不到某个类 / 没有 main / 无法执行入口」这类报错与模式强相关，"
+                "判读规则见系统提示的「运行模式判读」段。",
+                relevance_score=0.9,
+                metadata={"section": "Evidence"},
+            )
+        )
     for m in memories or []:
         packets.append(
             ContextPacket(

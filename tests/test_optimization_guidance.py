@@ -27,6 +27,16 @@ FRONTEND_EDIT_SUGGESTION = (
     _repo_root() / ".." / "javatutor" / "frontend" / "src" / "utils" / "editSuggestion.js"
 )
 
+# 前端 utils/optimization.js 的 buildRetryPrompt（返修提问模板，跨仓握手见下方两个标记）
+FRONTEND_OPTIMIZATION = (
+    _repo_root() / ".." / "javatutor" / "frontend" / "src" / "utils" / "optimization.js"
+)
+
+# 返修提问的两个握手标记：coze 引导据此认出返修提问，前端 buildRetryPrompt 据此写出该提问。
+# 两侧测试各自硬编码这两个短语——任何一端改字，另一端必须红。
+RETRY_MARK_HEADER = "上一版优化代码没有通过编译/运行校验"
+RETRY_MARK_CANDIDATE = "上一版候选代码"
+
 
 def _frontend_goals() -> dict:
     """从后端仓库直接读前端 GOALS——闭集是跨仓契约，手抄副本自证不了漂移。"""
@@ -168,6 +178,54 @@ def test_fewshots_second_round_states_exclusions():
     # 单方向样例的黑名单必须与引导同款措辞
     joined = "\n".join(get_main_few_shots())
     assert "不要顺带做其他方向的改动（例如：" in joined
+
+
+def _retry_section() -> str:
+    """取出「候选返修」段本体（到「局部修改不适用两步式」为止，避免尾段其它措辞干扰断言）。"""
+    text = render_optimization_guidance()
+    assert "**候选返修" in text, "引导缺少「候选返修」段"
+    section = text.split("**候选返修", 1)[1]
+    return section.split("**局部修改不适用两步式**", 1)[0]
+
+
+def test_guidance_has_retry_section():
+    """门禁失败后前端会重发提问，coze 必须认得并照办（否则 agent 只解释错误、不给代码）。"""
+    text = render_optimization_guidance()
+    assert "候选返修" in text
+    assert "保持一致" in text
+    section = _retry_section()
+    assert 'kind:"replace"' in section
+    assert "goal" in section and "target" in section
+
+
+def test_retry_section_is_replace_only_not_a_second_twostep():
+    """返修不得回退到两步式的第一步：不提 options、不提「第一步」。"""
+    section = _retry_section()
+    assert "options" not in section
+    assert "第一步" not in section
+
+
+def test_retry_section_allows_refusing_without_a_block():
+    """前端 F5：拿不到 replace 块时保留失败卡片——故 coze 侧必须允许「只说明原因、不给块」。"""
+    section = _retry_section()
+    assert "不要" in section and "replace 块" in section
+
+
+def test_retry_markers_match_frontend_template():
+    """返修提问的两个标记必须与前端 `buildRetryPrompt` 逐字一致（跨仓字面包含）。
+
+    前端模板写什么，agent 才认得什么；引导读什么，agent 才照做什么。
+    一侧改字另一侧静默失配（agent 退回「只解释错误」），所以这里真的读前端文件比对。
+    """
+    text = render_optimization_guidance()
+    assert RETRY_MARK_HEADER in text
+    assert RETRY_MARK_CANDIDATE in text
+    if not FRONTEND_OPTIMIZATION.exists():
+        pytest.skip("前端 optimization.js 不存在，跳过跨仓比对")
+    frontend = FRONTEND_OPTIMIZATION.read_text(encoding="utf-8")
+    assert RETRY_MARK_HEADER in frontend, "前端 buildRetryPrompt 的标记与 coze 引导不再一致"
+    assert RETRY_MARK_CANDIDATE in frontend, "前端 buildRetryPrompt 的标记与 coze 引导不再一致"
+    assert 'kind:"replace"' in frontend, "前端返修提问未要求 replace 块"
 
 
 def test_main_system_prompt_injects_optimization():

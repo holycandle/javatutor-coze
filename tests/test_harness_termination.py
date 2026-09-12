@@ -1,0 +1,135 @@
+"""终止性证明：图内真环一定停，且停在默认 ``recursion_limit``（25）以内。
+
+spec §4.3 的算术（每格是一步）：
+    6 个前置节点 + main_agent ≤ 4 + guard ≤ 3 + run_tools ≤ 3 + 5 个后置节点 = 21 < 25
+
+``tool_rounds`` 的口径是 **guard 的进入次数**（唯一记账处），所以直接作答时为 0。
+收束轮（``tool_rounds >= MAX_ROUNDS``）永不产出 Action——终止由结构保证，不靠提示词祈愿。
+"""
+
+import json
+
+from langchain_core.messages import AIMessage, HumanMessage
+
+from graphs.javatutor.graph import build_flow_graph
+from graphs.javatutor.harness.guard import MAX_ROUNDS
+from graphs.javatutor.harness.propose import CONVERGENCE_PREFIX
+from graphs.javatutor.prompts import (
+    SYSTEM_PROMPT_ANALYZE,
+    SYSTEM_PROMPT_CRITIC,
+    SYSTEM_PROMPT_MAIN_AGENT,
+    SYSTEM_PROMPT_REVISE,
+)
+
+STEP_FACTS_JSON = '{"tool": "step_facts", "args": {"step_index": 1}}'
+UNKNOWN_TOOL_JSON = '{"tool": "no_such_tool", "args": {}}'
+
+
+class SpamModel:
+    """病态模型：不管问几轮都只会吐同一个工具提案。"""
+
+    def __init__(self, main_script, analyses=True):
+        self.main_script = main_script
+        self.main_calls = 0
+        self.analyses = analyses
+
+    def invoke(self, messages):
+        system = messages[0].content or ""
+        if system.startswith(SYSTEM_PROMPT_ANALYZE):
+            return AIMessage(content='{"complexity": {"time": "O(1)"}}')
+        if system.startswith(SYSTEM_PROMPT_MAIN_AGENT):
+            self.main_calls += 1
+            return AIMessage(content=self.main_script)
+        if system.startswith(SYSTEM_PROMPT_CRITIC):
+            return AIMessage(content='{"pass": true, "issues": []}')
+        if system.startswith(SYSTEM_PROMPT_REVISE):
+            return AIMessage(content="修订后的回答")
+        raise AssertionError(f"未路由的 system prompt: {system[:40]}")
+
+
+def _payload() -> dict:
+    return {
+        "source_code": "public class A { void f() { int x = 1; } }",
+        "steps": [
+            {"step": 0, "line": 3, "variables": {"x": 1}},
+            {"step": 1, "line": 4, "variables": {"x": 2}},
+        ],
+        "current_step_index": 1,
+        "current_line": 4,
+        "user_question": "x 怎么变了？",
+        "compile_error": "",
+    }
+
+
+def _run(payload_over=None):
+    """不加 recursion_limit、不设 recursion_limit 上限——用 LangGraph 默认值当守卫。"""
+    model = SpamModel(STEP_FACTS_JSON)
+    payload = _payload()
+    payload.update(payload_over or {})
+    compiled = build_flow_graph().compile()
+    out = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+    )
+    return out, model
+
+
+def test_budget_arithmetic_fits_default_recursion_limit():
+    """把 spec §4.3 的算术钉在测试里：改 MAX_ROUNDS 先看它还成不成立。"""
+    assert MAX_ROUNDS == 3
+    pre_nodes, post_nodes = 6, 5
+    worst = pre_nodes + (MAX_ROUNDS + 1) + MAX_ROUNDS + MAX_ROUNDS + post_nodes
+    assert worst == 21
+    assert worst < 25  # LangGraph 默认 recursion_limit
+
+
+def test_pathological_model_terminates_within_budget():
+    """10 次工具提案：既不 GraphRecursionError，也不泄漏工具 JSON 当回答。"""
+    out, model = _run()
+
+    assert out["tool_rounds"] == MAX_ROUNDS
+    # 门闩轮次上界 ⇒ main_agent 至多 4 次、run_tools 至多 3 次
+    assert model.main_calls == MAX_ROUNDS + 1
+    executed = [
+        r for r in out["step_records"] if r["tool"] == "step_facts" and r["status"] == "ok"
+    ]
+    assert len(executed) == MAX_ROUNDS  # 预算真的给满 3 轮，没有被 P3 顺手吃掉一轮
+    # 自动前置 fetch 只做一次（P0-auto-fetch 不占轮次）
+    assert len([r for r in out["step_records"] if r["policy"] == "P0-auto-fetch"]) == 1
+
+    assert out["answer"]
+    # 收束轮交付既定证据，而不是把模型的工具 JSON 当终答
+    assert CONVERGENCE_PREFIX in out["answer"]
+    assert not out["answer"].lstrip().startswith("{")
+
+
+def test_unknown_tool_spam_never_reaches_execution():
+    """被 P1 拒的提案不进 tool_calls；预算耗尽后仍给出确定性终答。"""
+    model = SpamModel(UNKNOWN_TOOL_JSON)
+    compiled = build_flow_graph().compile()
+    out = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+    )
+
+    assert out["tool_rounds"] == MAX_ROUNDS
+    assert model.main_calls == MAX_ROUNDS + 1
+    assert not out.get("tool_calls")
+    assert [r["policy"] for r in out["step_records"]] == ["P1"] * MAX_ROUNDS
+    assert out["answer"]
+    assert "no_such_tool" not in out["answer"]
+
+
+def test_direct_answer_never_enters_the_loop():
+    """无需工具的问题：guard/run_tools 一次都不进（不白花轮次）。"""
+    model = SpamModel("直接回答就好")  # 散文，parse_action 返回 None
+    compiled = build_flow_graph().compile()
+    out = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+    )
+
+    assert model.main_calls == 1
+    assert out.get("tool_rounds", 0) == 0
+    assert not out.get("step_records")
+    assert "直接回答就好" in out["answer"]

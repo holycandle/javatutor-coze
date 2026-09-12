@@ -28,6 +28,7 @@ from graphs.javatutor.prompting.contexts import (
     build_other_context,
 )
 from graphs.javatutor.prompting.fewshots import get_few_shots
+from graphs.javatutor.verification import verify_grounding
 
 # ── 去重后处理 & Markdown 规整 ──────────────────────────────────────────────────
 
@@ -123,6 +124,12 @@ def _parse_json_dict(data: dict) -> dict:
     algorithm_tags = data.get("algorithm_tags") or []
     files = normalize_files(data.get("files"))
     entry_file = str(data.get("entry_file") or "")
+    # 运行模式事实（前端报、后端透传）。缺失为空串 = 模式未知，不得当成 default（见 state.py）。
+    run_mode = str(data.get("run_mode") or "")
+    try:
+        test_case_count = int(data.get("test_case_count") or 0)
+    except (TypeError, ValueError):
+        test_case_count = 0
 
     # 提取当前步骤的变量快照 + 当前步所在文件
     current_variables = {}
@@ -153,6 +160,8 @@ def _parse_json_dict(data: dict) -> dict:
         "algorithm_tags": algorithm_tags,
         "files": files,
         "entry_file": entry_file,
+        "run_mode": run_mode,
+        "test_case_count": test_case_count,
         "current_step_file": current_step_file,
         "fallback_reason": "",
         "request_started_at": time.time(),
@@ -412,6 +421,48 @@ def _sanitize_code_quotes(text: str) -> str:
     return '\n'.join(out)
 
 
+_STRUCTURED_MARKERS = ("【决策痕迹】", "【编辑建议】", "【视角导航】")
+
+
+def _strip_structured_blocks(text: str) -> str:
+    """剥掉结构化块（决策痕迹 / 编辑建议 / 视角导航），只留回答正文。
+
+    这些块的 JSON 里含代码片段与行号样数字（如堆对象 `h1`、代码里的数字），
+    不剥会给 grounding 核对器造出假阳性。三个块都紧贴回答末尾，取最早出现的标记截断即可。
+
+    取舍：若**正文本身**提到「【编辑建议】」这四个字（例如在解释这个功能），
+    其后正文会一并被切出核对范围。方向是保守的（少核对，而不是误判为幻觉），
+    代价可接受；要收紧就得先解析出块的起止边界，不值得。
+    """
+    if not text:
+        return ""
+    cut = len(text)
+    for marker in _STRUCTURED_MARKERS:
+        pos = text.find(marker)
+        if pos != -1:
+            cut = min(cut, pos)
+    return text[:cut].rstrip()
+
+
+def verify_node(state: JavaTutorState) -> dict:
+    """确定性 grounding 核对（原则⑤）：核对最终交付文本的引用真实性。
+
+    **只记录、不参与路由**（D4）：拒绝结束会在真实教学场景把可用回答变成不可用。
+    它与 LLM 评审互补——`critic_skipped=True` 时，这是唯一还站着的客观证据。
+    """
+    body = _strip_structured_blocks(state.get("revised_answer") or state.get("answer") or "")
+    result = verify_grounding(
+        {
+            "payload": {
+                "steps": state.get("steps") or [],
+                "source_code": state.get("source_code") or "",
+            }
+        },
+        body,
+    )
+    return {"verification": result}
+
+
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
@@ -448,6 +499,7 @@ def build_final(state: JavaTutorState) -> dict:
         "compaction_mode": state.get("compaction_mode", "none"),
         "tool_calls": tool_calls,
         "token_usage": _estimate_token_usage(state),
+        "verification": state.get("verification") or {},
     }
     trace_json = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))
     content = f"{answer}\n\n【决策痕迹】\n{trace_json}"

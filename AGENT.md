@@ -21,6 +21,11 @@
 | 执行上下文拉取 plan | 已执行 |
 | 执行上下文作为工具 spec | 已执行 |
 | 执行上下文作为工具 plan | 已执行 |
+| Harness 工程 spec（图内真环 + 治理门闩 + HITL 内核） | 已定稿 |
+| Harness 工程 plan | 已执行 |
+| 联调修复 spec 变更（优化候选自动返修 / 测试模式运行上下文） | 已执行（写入既有 spec） |
+| 联调修复 plan（自动返修 + 测试模式上下文） | 已执行（含跨仓前端/后端改动） |
+| 联调修复 review（自动返修 + 测试模式上下文） | 已处理（1 P2 / 6 P3 全部处置；2 条建议未采纳并附理由，见两份 devlog §8） |
 
 ## 规约与文档索引
 
@@ -68,6 +73,15 @@
 | 知识库核对 | `docs/devlog/2026-08-25-knowledge-base-correction.md` | 领域本体核对修正 + 项目知识扩充（134 passed） |
 | 非当前步证据标签修复 | `docs/devlog/2026-09-02-step-facts-non-current-step-file.md` | 评审核对证据的 0/1-based 标签错配，单文件查非当前步（190 passed） |
 | fetch 调用率提升 | `docs/devlog/2026-09-08-raise-fetch-tool-call-rate.md` | step_facts 前置自动 fetch + 提示词强化，修复 round-2 分数下降（205 passed） |
+| Harness 工程设计 | `docs/spec/2026-09-11-agent-harness-react-loop-design.md` | 图内真环 propose→guard→tools、统一动作契约、治理门闩（allow/deny/needs_decision）、收束轮、HITL 内核、grounding 接入运行时 |
+| Harness 工程计划 | `docs/plan/2026-09-11-agent-harness-react-loop-plan.md` | 上述设计的 TDD 实施计划（含 test_main_agent.py 迁移表、终止性预算、外壳改造请求清单） |
+| Harness 工程实现 | `docs/devlog/2026-09-11-agent-harness-react-loop.md` | 图内真环 propose→guard→tools + 治理门闩 P0–P5 + HITL 内核 + grounding 接入运行时（311 passed，4 处计划偏差，review 5 项已修） |
+| Harness 工程 review | `docs/reviews/2026-09-11-agent-harness-react-loop-review.md` | 执行审查（1 P1 红线偏离 / 1 P2 HITL 末轮 / 3 P3；L1–L5 已复现）；**5 项全部已修复**，P1-1 采纳「保留行为 + 改 spec §5.1」、P2-1 改为 `P4-resolved` |
+| 优化候选自动返修计划 | `docs/plan/2026-09-12-coze-agent-optimization-gate-retry-plan.md` | 2026-09-12 联调：门禁失败后前端自动返修候选（上限 2 次、原地替换卡片、只在最新一条 assistant 消息上、传输失败不返修）；跨前端 + coze |
+| 测试模式上下文修复计划 | `docs/plan/2026-09-12-coze-agent-test-mode-context-fix-plan.md` | 2026-09-12 联调：测试模式未激活导致 agent 误诊——前端补运行模式事实（chat body + 报错入口）、后端透传、coze 补本体知识与「运行模式判读」引导；跨前端 + 后端 + coze |
+| 优化候选自动返修实现 | `docs/devlog/2026-09-12-coze-agent-optimization-gate-retry.md` | 门禁失败后自动返修（上限 2 次、原地替换卡片、只在最新 assistant 消息、传输失败只重跑门禁）+ coze 返修引导段（前端 383 / coze 327，3 处计划偏差含 `regate` 闩防 fetch 风暴；review 5 项处置见 §8：重跑通知量收到**消息级**、返修状态机补 7 条回归） |
+| 测试模式上下文修复实现 | `docs/devlog/2026-09-12-coze-agent-test-mode-context.md` | `run_mode`/`test_case_count` 透传 → state → `### 运行模式` packet + 评审核对 facts 行 + 引导段 + 本体扩充（后端 126 / coze 327，5 处计划偏差含后端基线口径更正 124→123；review 3 项处置见 §8：`user_guides` 只进主 Agent、本体去重） |
+| 联调修复 review | `docs/reviews/2026-09-12-coze-agent-optimization-retry-and-test-mode-review.md` | 两件联调修复执行审查（1 P2 / 6 P3，不阻塞合并），**已全部处置**：P2-1 补返修状态机回归网；P3-1 订正计划自身的「本体同时被 Judge 消费」事实性错误（`user_guides` 只进主 Agent）；P3-4 同步 spec §8/§9/§11；P3-6 重跑 nonce 由全局收到消息级（顺带消 P3-3(b)）；P3-2 复核后**前提不成立**（门禁走裸 `fetch`，`httpStatus` 分支可达），改记真实的三条到达路径；另附后端用例计数陷阱（陈旧 surefire 报告会多算 1） |
 
 ## 文档规范
 

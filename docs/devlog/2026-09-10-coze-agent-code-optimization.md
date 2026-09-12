@@ -113,6 +113,6 @@ review 结论为不阻断合并，R1/R2 建议发布前处理。本轮 R1–R5 *
 | **R4** | 低 | ✅ 修 | `canApply({targetBlocked, gate, applied})` 抽成 `utils/optimization.js` 纯函数、组件改为调用它，并补 4 条单测（门禁 idle/running/fail、目标被拦截、已应用）。`window.confirm` 分支保持手验，清单第 4 条已标注**【必测】** |
 | **R5** | 极低 | ✅ 修（选「删」） | `lastRunError` 只留 `{ message }`：`code`/`mode` 无任何消费者，且多文件下 `code` 取的是 `store.code`（激活文件）而非整个项目、语义片面。若将来要把代码一并附给 agent，应走 Shell 的 `getCode`。spec §5 已同步 |
 
-同步的文档：spec §5（`lastRunError` 形态 + 点击切面板）、spec §6.2（运行快照卡片自持及其理由）、本 devlog §2/§3/§5/§6。
+同步的文档：spec §5（`lastRunError` 形态 + 点击切面板）、spec §6.3（运行快照卡片自持及其理由，2026-09-12 起由 §6.2 顺延）、本 devlog §2/§3/§5/§6。
 
 验证：前端 **295 passed（25 files）**、coze **226 passed**、`npm run build` 通过。**仍未做**：`npm run dev` 手验清单 1–9、coze 侧重新发布 agent。

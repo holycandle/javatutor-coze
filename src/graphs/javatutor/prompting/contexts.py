@@ -126,6 +126,19 @@ def build_facts_block(state: dict[str, Any]) -> str:
         f"学生问题：{state.get('user_question', '')}",
         f"编译错误：{state.get('compile_error', '')}",
     ]
+    # 运行模式事实（前端报、后端透传）。与「编译错误」同理：评审要核对回答里的断言，
+    # 就必须看得到该断言所依赖的事实，否则会把「当前是默认模式」这类正确解释误判为幻觉。
+    # 缺失（旧客户端）⇒ 不加行，零行为变化。
+    if state.get("run_mode"):
+        n = int(state.get("test_case_count") or 0)
+        lines.append(
+            "运行模式："
+            + (
+                f"测试模式（用例 {n} 条）"
+                if state["run_mode"] == "test"
+                else f"默认模式（测试模式未激活，用例 {n} 条）"
+            )
+        )
     if state.get("has_steps"):
         lines.append(_step_snapshot(state))
     # 主 Agent 工具循环查到的单步证据（step_facts 结果），供评审核对非当前步的引用。
