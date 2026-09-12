@@ -27,6 +27,30 @@
 - `intent` 合法枚举：`data_query`、`concept`、`debug`、`animate`、`animate_guide`、`analyze`、`other`。
 - `steps` 允许为空数组；`compile_error` 允许为空字符串；`user_id` 允许缺失。
 
+### 1.1 运行模式字段（可选；仅 chat 路径）
+
+前端在 `/api/ai/chat` 的请求里随**每次**提问携带本次运行的模式事实，后端原样透传（下列两键与 §1 的字段同层，
+此处只摘录新增部分）：
+
+```json
+{
+  "run_mode": "test",
+  "test_case_count": 2
+}
+```
+
+规则：
+
+- **可选**：仅 chat 路径、且客户端支持时出现；其它入口（`analyze`/`uml`/`animate`）不带。
+- 两键**同时出现或同时缺失**（后端只按 `run_mode` 非空判定是否携带）。
+- `run_mode` 合法值：`"test"` | `"default"`；`test_case_count` 为已保存用例数（`int`，**0 是有意义的值，不得省略**）。
+- **缺失 = 模式未知**（旧客户端）：智能体不得注入任何运行模式上下文，也不得臆测模式、
+  **不得把缺失等同于 `"default"`**（两种状态在智能体侧是不同的 state 值）。
+- 职责切分：**事实**（本次运行是哪种模式）由前端传；**语义**（两种模式各要求什么）只写智能体侧知识与引导，
+  前端不在提问文本里写 JavaTutor 内部运行语义。
+- 落点见 [2026-09-12 测试模式误诊修复](../devlog/2026-09-12-coze-agent-test-mode-context.md)：
+  state `run_mode`/`test_case_count` → `### 运行模式` 上下文 packet + 评审核对 facts 块一行 + 「运行模式判读」引导段。
+
 ## 2. Response（Coze 智能体 → 消息文本）
 
 智能体回答正文后，可能追加决策痕迹块：

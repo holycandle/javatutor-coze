@@ -124,6 +124,12 @@ def _parse_json_dict(data: dict) -> dict:
     algorithm_tags = data.get("algorithm_tags") or []
     files = normalize_files(data.get("files"))
     entry_file = str(data.get("entry_file") or "")
+    # 运行模式事实（前端报、后端透传）。缺失为空串 = 模式未知，不得当成 default（见 state.py）。
+    run_mode = str(data.get("run_mode") or "")
+    try:
+        test_case_count = int(data.get("test_case_count") or 0)
+    except (TypeError, ValueError):
+        test_case_count = 0
 
     # 提取当前步骤的变量快照 + 当前步所在文件
     current_variables = {}
@@ -154,6 +160,8 @@ def _parse_json_dict(data: dict) -> dict:
         "algorithm_tags": algorithm_tags,
         "files": files,
         "entry_file": entry_file,
+        "run_mode": run_mode,
+        "test_case_count": test_case_count,
         "current_step_file": current_step_file,
         "fallback_reason": "",
         "request_started_at": time.time(),

@@ -19,6 +19,7 @@ from graphs.javatutor.prompting.optimization import render_optimization_guidance
 from graphs.javatutor.prompting.panels import (
     render_algo_catalog,
     render_nav_guidance,
+    render_run_mode_guide,
     render_ui_map,
     render_usage_guide,
 )
@@ -35,11 +36,12 @@ CONVERGENCE_PREFIX = "（工具轮次预算已用尽，以下为已获得的执�
 
 
 def _main_system_prompt() -> str:
-    """主 Agent 系统提示 = 模板 + 运行时注入的导航引导 / 算法目录 / 使用指南 / 优化引导 / 面板图 / few-shot（随 manifest 联动）。"""
+    """主 Agent 系统提示 = 模板 + 运行时注入的导航引导 / 算法目录 / 使用指南 / 优化引导 / 运行模式判读 / 面板图 / few-shot（随 manifest 联动）。"""
     few = "\n\n".join(get_main_few_shots())
     return (
         f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_algo_catalog()}\n\n"
-        f"{render_usage_guide()}\n\n{render_optimization_guidance()}\n\n{render_ui_map()}\n\n## 回答示例\n{few}"
+        f"{render_usage_guide()}\n\n{render_optimization_guidance()}\n\n{render_run_mode_guide()}\n\n"
+        f"{render_ui_map()}\n\n## 回答示例\n{few}"
     )
 
 

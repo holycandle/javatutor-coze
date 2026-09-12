@@ -160,8 +160,22 @@
 - **点击行为（只预填 + 切到 agent 面板 + 聚焦）**：把下列文本写入 agent 输入框草稿，**不发送**：
   ```text
   我的代码运行报错了，请帮我看看怎么修正：
+
+  [运行环境]
+  - 文件模式：多文件（3 个文件，主入口 Main.java）      ← 仅多文件时出现
+  - 运行模式：默认模式（测试模式未激活：已保存用例 0 条）
+
+  [错误原文]
   <错误原文>
   ```
+  - `[运行环境]` 块由 `utils/errorEntry.js::runEnvLines(ctx)` 产出（`ctx` 缺省 ⇒ 整块省略，退化为旧文本）；
+    首行与 `[错误原文]` 小节是稳定骨架。
+  - **只陈述事实**（本次的模式 / 文件形态与计数），**不写任何 JavaTutor 运行语义**——
+    「默认模式需要 main / 测试模式会抽取块注释里的类」由 coze 侧知识与引导给出（见
+    [2026-09-12 测试模式误诊修复](../devlog/2026-09-12-coze-agent-test-mode-context.md) 的 F2）。
+  - 强调用**纯文本**（括号承载含义）而非 `**`：该文本落在草稿 textarea 与转义渲染的用户气泡里，**两处都不走 markdown**。
+  - 模式事实同时随**每次**提问走请求体（`run_mode` / `test_case_count`，见
+    [2026-08-10-coze-agent-interface.md](./2026-08-10-coze-agent-interface.md) §1.1），不只在报错入口。
   输入框在「agent」pane，而用户可能停在任意 tab —— 故 `focusChatWithDraft()` 必须同时
   `navigateTo('tutor')` 并 `chatFocusNonce += 1`（`AiTutorPanel` 监听后 `focus()` + 光标移到末尾），
   否则点击后画面毫无变化、草稿落在看不见的面板里（见 review R1 / F5）。
@@ -175,12 +189,45 @@
 - 收到 `kind:"replace"` 块后，前端**自动**把候选代码送去跑一次：
   - 单文件：`POST /api/run`，body `{code: <候选>}`（test 模式带 `mode:'test'` + `testCases`）。
   - 多文件：`POST /api/run/project`，body `{files: <全部文件，其中 target 替换为候选>}`。
-- `success !== true`（含编译错、运行异常、超时、沙箱拦截）→ 卡片显示错误原文，**「应用」禁用**。
-- `success === true` → 「应用」可用；**该次运行结果同时缓存为「覆盖后」快照**（供 §6.2 与 D7 使用）。
+- `success !== true`（含编译错、运行异常、超时、沙箱拦截）→ 卡片显示错误原文，**「应用」禁用**；
+  **若该卡是最新一条 assistant 消息**，自动发起返修提问（上限 2 次 ≈ 最多 3 版候选，
+  见 `docs/plan/2026-09-12-coze-agent-optimization-gate-retry-plan.md`）；
+  耗尽 / 非最新 / 传输失败 → 保持禁用（现状行为）。
+- 返修**不新增消息、不新增记录点**：只重写该条 assistant 消息的 `text`（`chatMessages.length` 与 `timeline` 不变）。
+  这是时间线 `chatPoint.chatIndex` 语义（下标即折叠边界）的前提，不得破坏。
+- **传输失败**（fetch 抛异常 / HTTP ≥ 400，见 §6.2）不返修，只让卡片**自动重跑一次**门禁
+  （重跑仍失败则保持现状）——链路不通时重生成一版同样验不了，不该烧返修额度。
+- `success === true` → 「应用」可用；**该次运行结果同时缓存为「覆盖后」快照**（供 §6.3 与 D7 使用）。
 - 门禁是**前端**动作，不经过 agent、不消耗 agent token。
 - **局限（已知并接受）**：门禁只能验「能不能跑」，验不了「有没有偷改语义」。前后对比展示是对用户的部分补偿。
 
-### 6.2 应用与撤销（D10）
+### 6.2 门禁失败分流与自动返修
+
+门禁失败分两类，**判据只看传输层**：
+
+| 类别 | 判据 | 处置 |
+|---|---|---|
+| 链路失败（transport） | `fetch` 抛异常，或 `res.status >= 400` | 不返修；让卡片**自动重跑一次**门禁 |
+| 运行失败（run） | HTTP 200 且 `success !== true`（编译/运行失败） | 返修（上限 2 次） |
+
+- 为什么必须分流：编译/运行失败由后端以 **HTTP 200 + `success:false`** 返回，故「HTTP ≥ 400」可安全用作链路失败判据；
+  不区分就会在断网时把 2 次返修额度全烧光（D6）。
+- **表中两条判据都可达**（review P3-2 复核：原疑「`httpStatus` 分支不可观察」**不成立**）：
+  门禁刻意用**裸 `fetch`**（`OptimizationCard.vue::runGate`，不走 `utils/http.js`——后者在非 2xx 时先抛 `HTTP <status>`）。
+  于是三种形态各有归属：非 2xx + JSON body（如 Spring 的 500）→ 走 `res.status` 判据；非 2xx + 非 JSON body
+  （nginx 502 错误页）→ `res.json()` 抛异常 → 走 `thrown` 判据；2xx + `success:false` → 运行失败。三者分流一致。
+- 返修提问由前端按模板拼（`utils/optimization.js::buildRetryPrompt`），**候选代码必须内联**：
+  提问体里的 `code` 是用户编辑器里的代码、不是候选代码（候选只活在 `props.plan.code`），
+  上下文（`steps`/`runId`/`files`…）则复用同一次提问的 body。
+  模板首行的两个标记（「上一版优化代码没有通过编译/运行校验」「上一版候选代码」）与 coze 引导
+  「候选返修」段**互为字面包含**，跨仓守卫见 `tests/test_optimization_guidance.py`。
+- 返修结果**必须**含 `kind:"replace"` 块才落地（否则丢弃该次返修、保留失败卡片）：
+  自动返修不得销毁用户已看到的证据（错误原文 + 候选代码）。
+- 上限与「已自动重跑」闩由 store 持有，不放在卡片里——卡片会因折叠/重挂载丢失局部状态。
+  重跑闩按消息加（门禁成功后解闩），否则「重跑 → 失败 → 重跑」会形成 fetch 风暴。
+- 用户在返修期间手动提问 → **抢占**（abort 返修）；被抢占的那一次不退还次数（次数按「生成」计）。
+
+### 6.3 应用与撤销（D10）
 
 **应用**：
 - 实现为**覆盖全文区间的 `executeEdits`**（而非 `setCode`），以复用 Monaco undo 栈与 `undoToken`，使整次覆盖是**一个撤销单元**。
@@ -232,6 +279,18 @@
 5. **多文件** — `src/components/MultiFileShell.vue` / `SingleFileShell.vue`
    - 按文件名替换 `multiState.files[i].code` 并切到该文件（`activeFileIndex`）。
    - 两者新增 `provide('restoreCode', ...)`，供卡片在撤销兜底时直接写入编辑器/文件内容。
+6. **返修纯逻辑**（2026-09-12 补，见 `docs/plan/2026-09-12-coze-agent-optimization-gate-retry-plan.md`）
+   — `src/utils/optimization.js` 新增导出：`MAX_OPT_RETRY`（=2）/ `classifyGateFailure` / `nextRetry` /
+   `retryLabel` / `buildRetryPrompt` / `hasUsableReplace`，配 `src/utils/optimization.test.js` 用例。
+   本仓**无 DOM 测试环境**，组件逻辑只能手验，故判定一律抽成纯函数。
+7. **返修状态与接线**（同上）
+   - `src/stores/player.js`：抽 `buildChatBody(question)` / `_runChat({question, onChunk, onStage, onError, signal})`
+     （`askQuestion` 对外行为一字不变）；新增 `optRepair` / `optAbortController` / `optRegateNonce` 状态与
+     `requestOptimizationRetry(msgIndex, {...})` / `notifyGateOk(msgIndex)` 动作。
+   - `src/components/OptimizationCard.vue`：新增 `msgIndex` / `rev` / `repair` 三个 prop；门禁失败按 §6.2 分流上报；
+     返修态文案优先于失败态；`watch(() => [rev, optRegateNonce])` 重跑门禁（**不** watch `props.plan`——对象身份每次重算都变）。
+   - `src/components/AiTutorPanel.vue`：把 `:msg-index` / `:rev` / `:repair` 传给卡片
+     （`rev` 与 `repair` 直接取自 `store.chatMessages[i]` / `store.optRepair`，不经 `parsedMessages`）。
 
 ### 7.2 coze（`javatutor-coze`）
 
@@ -241,6 +300,9 @@
    - `goal` 闭集表（含 `comprehensive`，方案卡不得产出）；`replace` 的 `code` 必须是**完整可编译**的整份文件（不得占位省略）；
    - **第二步的方向硬约束**（F2/F3）：只做提问里列出的方向、未列出的不得顺手改、≥2 方向记 `comprehensive` 并逐项写 `rationale`；
    - 与「报错修正」的关系：报错场景同理——先给修正方案选项，选定后给整份代码；
+   - **候选返修段**（2026-09-12 补，见 §6.2）：认出「上一版优化代码没有通过编译/运行校验」类提问，
+     直接（不再给方案卡）重新交付一版 `kind:"replace"`，`goal`/`target` 与上一版保持一致，
+     修正范围仅限让代码能编译/运行通过；无法在不改方向的前提下修好时只给正文、不给块；
    - `target` 规则（多文件必填）。
 2. **`main_agent.py`** — `_main_system_prompt()` 注入 `render_optimization_guidance()`（走 SystemMessage，不被 compress 截断）。
 3. **`prompts.py`**
@@ -251,7 +313,9 @@
    - 第 2 轮（单方向）：提问为 F2 模板（含「不要顺带做其他方向的改动（例如：…）」）→ 给 `replace` 整份代码 + `rationale`，`goal` = 该方向；
    - 第 2 轮（多方向）：提问逐条列出 ①② → `replace` 的 `goal: "comprehensive"`，`rationale` 分别说明两方向。
 5. **守卫测试** — `tests/`：引导块含 goal 闭集、两步式约束、**方向硬约束**；few-shot 样本 JSON 合法、
-   `options` 的 goal 全部落在闭集内（且不含 `comprehensive`）、第二步样例示范白名单/黑名单、存在多方向样例。
+   `options` 的 goal 全部落在闭集内（且不含 `comprehensive`）、第二步样例示范白名单/黑名单、存在多方向样例；
+   返修段为 replace 专用（不得回退到两步式第一步），且与前端 `buildRetryPrompt` 的两个标记**互为字面包含**
+   （跨仓读前端 `utils/optimization.js` 比对，见 `tests/test_optimization_guidance.py`）。
 
 ### 7.3 后端（`javatutor/backend`）
 
@@ -264,6 +328,8 @@
 2. 在方案卡上勾选（可多选）后提交 → 前端发出模板提问（可在消息列表看到，含「只做…」+「不要顺带做其他方向的改动（例如：…）」），
    第 2 轮回答附 `kind:"replace"` 块，且**代码里只含所选方向的改动**（未选方向即便明显可优化也不得顺手改）。
 3. **门禁**：候选跑不通 → 卡片显示错误、「应用」禁用；跑通 → 「应用」可用。
+   失败后若该卡挂在**最新一条 assistant 消息**上，前端**自动返修**（最多 2 次额外生成、原地替换卡片、自动重跑门禁）；
+   耗尽 / 非最新 / 传输失败 → 回到上面的现状行为（详见 §6.2）。
 4. 点「应用」→ 编辑器被覆盖为候选代码（**一个撤销单元**），右侧面板刷新为候选运行结果，前后对比可见。
 5. **撤销**：未编辑时 → 精确回滚；已编辑时 → 提示「将丢弃此后的编辑」并快照还原。
 6. **报错**：运行失败后红色弹窗**常驻**（10 秒后仍在），含「让 agent 帮我看看」；
@@ -277,9 +343,13 @@
 
 - **前端**：`editSuggestion.test.js`（`options`/`replace` 解析、`usable` 回退、`patch` 回归）、卡片三分支渲染、
   `applyCandidateRun` 不清会话、整文件覆盖的 apply/undo（含 token 失效回退快照）、多文件 target 替换、
-  `npm test` 全绿。
-- **coze**：`uv run pytest -q` 全量；新增引导/few-shot 守卫（goal 闭集、两步式、`code` 完整性要求）。
-- **手验**：`npm run dev` 跑验收 1–8（含报错预填与多文件）。
+  `optimization.test.js`（返修纯逻辑：`classifyGateFailure` / `nextRetry` / `buildRetryPrompt` / `hasUsableReplace`）、
+  `stores/__tests__/player-optimization.test.js`（返修状态机：链路失败闩的终止性与解闩、重跑通知量**按消息**、
+  上限耗尽后停止、飞行中不重入、被用户提问抢占的那一次不退还额度）、`npm test` 全绿。
+- **coze**：`uv run pytest -q` 全量；新增引导/few-shot 守卫（goal 闭集、两步式、`code` 完整性要求、
+  候选返修段与前端 `buildRetryPrompt` 的两个标记**互为字面包含** → `tests/test_optimization_guidance.py`）；
+  运行模式守卫（payload → state → packet → facts 块 → 引导 → 本体 → `tests/test_run_mode_context.py`）。
+- **手验**：`npm run dev` 跑验收 1–8（含报错预填与多文件）；逐条清单见两份 2026-09-12 devlog。
 
 ## 10. 风险 / 待确认
 
@@ -296,7 +366,16 @@
 
 ## 11. 文档登记
 
-- 接口契约：`docs/spec/2026-08-10-coze-agent-interface.md` 增「编辑建议块扩展（kind）」小节（§2.2）。
+- 接口契约：`docs/spec/2026-08-10-coze-agent-interface.md` 增「编辑建议块扩展（kind）」（§2.2）
+  与「运行模式字段（可选，仅 chat 路径）」（§1.1）。
 - 本 spec：`docs/spec/2026-09-10-coze-agent-code-optimization.md`。
-- 若图结构/节点输入输出有变，同步 `docs/agent-collaboration-guide.md`。
-- 实现后补 `docs/devlog/2026-09-10-coze-agent-code-optimization.md` 与 review。
+- 若图结构/节点输入输出有变，同步 `docs/agent-collaboration-guide.md`（2026-09-12 已同步输入侧的可选 `run_mode` / `test_case_count`）。
+- 实现记录：
+  - `docs/devlog/2026-09-10-coze-agent-code-optimization.md` 与本 spec 的 review（R1–R5）。
+  - `docs/devlog/2026-08-30-multifile-whole-project.md`（多文件通道，`replace` 的 `target` 依赖它）。
+- 2026-09-12 两件后续（同批联调，均由本 spec 派生）：
+  - **门禁失败自动返修** — 计划 `docs/plan/2026-09-12-coze-agent-optimization-gate-retry-plan.md`
+    / 记录 `docs/devlog/2026-09-12-coze-agent-optimization-gate-retry.md`（本 spec 新增 §6.2，同步 §6.1/§7.1/§7.2）。
+  - **测试模式上下文** — 计划 `docs/plan/2026-09-12-coze-agent-test-mode-context-fix-plan.md`
+    / 记录 `docs/devlog/2026-09-12-coze-agent-test-mode-context.md`（同步本 spec §5 报错入口的预填文本）。
+  - 两件合并 review：`docs/reviews/2026-09-12-coze-agent-optimization-retry-and-test-mode-review.md`。

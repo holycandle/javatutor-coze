@@ -156,6 +156,15 @@ class JavaTutorState(TypedDict, total=False):
     entry_file: str
     """主入口文件名（可选）。存在时 fetch_execution_context 无 file 参数时默认读该文件；行号锚点=该文件。"""
 
+    run_mode: str
+    """本次运行后端采用的模式：``"test"`` | ``"default"`` | ``""``（缺失，即旧客户端）。
+
+    **事实**由前端随每次提问送来（后端透传），语义（两种模式各要求什么）只写在本仓知识与引导里。
+    缺失（``""``）表示**模式未知**，不得默认按 ``"default"`` 解释。"""
+
+    test_case_count: int
+    """本次运行已保存的测试用例数；``run_mode`` 缺失时为 0。"""
+
     current_step_file: str
     """当前步（steps[current_step_index]）所在文件，来自该 step 的 file 字段。供 agent 自证「当前步在哪个文件」，step_facts 据此对齐。"""
 
