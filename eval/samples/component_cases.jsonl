@@ -2,4 +2,4 @@
 {"id": "c02", "type": "intent", "input": {"user_question": "HashMap 是什么", "compile_error": ""}, "expected": "concept"}
 {"id": "c03", "type": "citation", "input": {}, "answer": "第 2 步 arr[1] 变成了 5", "expected_facts": ["step=2", "arr[1]=5"]}
 {"id": "c04", "type": "critic", "input": {}, "answer": "第 2 步 arr[1] 变成了 8", "expected_facts": ["step=2", "arr[1]=5"], "expect_fail": true}
-{"id": "c05", "type": "rag", "input": {"query": "HashMap 原理"}, "expected_sources": ["知识库: HashMap"]}
+{"id": "c05", "type": "rag", "input": {"query": "HashMap 原理"}, "expected_sources": ["知识库: HashMap.get"]}
