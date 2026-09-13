@@ -16,6 +16,7 @@ from graphs.javatutor.harness.contracts import Observation, observation_to_dict,
 from graphs.javatutor.harness.guard import REPEAT_STEP_NUDGE, round_marker
 from graphs.javatutor.harness.registry import TOOLS
 from graphs.javatutor.harness.render import _format_step_facts, _handle_fetch
+from graphs.javatutor.process_events import with_process_events
 from tools.step_facts import step_facts
 
 # 治理侧白名单（``registry.TOOLS``）与本节点的派发分支必须同源：漂移在 import 期就炸，
@@ -165,6 +166,33 @@ def run_tools_node(state, model=None) -> dict:
         HumanMessage(content="\n".join(f"{render_observation(o)}\n\n{marker}" for o in observations))
     ]
 
+    # 过程哨兵：把「已执行的工具」即时推给前端，而不必等 build_final 的决策痕迹。
+    # 事件**从 observations 派生**，绝不从 state["proposed_action"] 取——提案是「打算做」，
+    # 观察是「已经做了」，两者在门闩改写 / 自动前置 fetch 时会分叉。
+    # 这里无需 _redact_denied_tools：被拒绝的工具根本到不了本节点（门闩 P1 已拦），
+    # 故哨兵里只可能出现白名单工具名。此不变式由 tests/test_harness_loop.py 的红线测试守着。
+    #
+    # ⚠ 外部约束（review 2026-09-13 P3-1）：哨兵能否出流，**取决于本节点不叫 `tools`**。
+    # 平台 SDK `coze_coding_utils/helper/agent_helper.py::_item_to_server_messages` 里有一条
+    # `if meta["langgraph_node"] == "tools": return []`（其注释自述
+    # "prevent internal model outputs from leaking as answers"），针对的是 LangGraph 标准
+    # ReAct 的 `tools` 节点名。本仓节点注册为 `run_tools`（graph.py），**恰好不匹配**，
+    # 哨兵才得以流出——特性成立靠的是这个「恰好」。
+    # **若有人把节点改名为 `tools`，本节点的全部哨兵会被 SDK 静默吞掉**，
+    # 表现为「进度区停在『正在分析问题…』」，且**不会有任何报错**。
+    # 改名前请先确认 SDK 该分支的行为（或改走别的出流方式）。
+    events = [
+        {
+            "kind": "tool",
+            "tool": o.tool,
+            "args": o.args,
+            "status": o.status,
+            "latency_ms": o.latency_ms,
+        }
+        for o in observations
+    ]
+    events.append({"kind": "stage", "text": "证据已就绪，正在生成回答…"})
+
     return {
         "tool_calls": list(state.get("tool_calls") or []) + tool_calls,
         "step_records": list(state.get("step_records") or [])
@@ -175,4 +203,5 @@ def run_tools_node(state, model=None) -> dict:
         "fetched_injected": fetched_injected,
         "served_step_indices": served,
         **fetched_updates,
+        **with_process_events(state, events),
     }

@@ -135,7 +135,9 @@ step_facts 的 step_index 是 0-based：第 1 步 = step_index 0，第 N 步 = s
 第 2 轮，再查询第 2 步的单步证据（第 2 步 = step_index 1）：
 {"tool": "step_facts", "args": {"step_index": 1, "line": 4}}
 
-第 3 轮，基于源码与证据直接回答，引用真实行号与变量值，不再重复查询。"""
+第 3 轮，基于源码与证据直接回答，引用真实行号与变量值，不再重复查询。
+
+工具调用 JSON 必须独占一条消息，不得与回答正文写在同一段里；回答正文中不得出现工具调用 JSON。"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block

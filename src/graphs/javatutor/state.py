@@ -11,7 +11,20 @@ class JavaTutorState(TypedDict, total=False):
     # === 原始输入 ===
     # 使用 add_messages reducer：每步追加新消息而非替换
     messages: Annotated[list[AnyMessage], add_messages]
-    """LangGraph 消息历史，parse_context 读取最后一条消息的 JSON."""
+    """LangGraph 消息历史，parse_context 读取最后一条消息的 JSON.
+
+    **同时是过程哨兵的出口**：``stream_mode="messages"`` 只转发本键的消息，
+    业务节点借此把阶段/工具事件即时推给前端。哨兵是**流中**产物，必须在 ``final``
+    被 ``RemoveMessage`` 清掉（见 ``process_event_ids``），否则会跨请求累积。"""
+
+    process_event_ids: list[str]
+    """本请求发射的过程哨兵消息 id，供 ``build_final`` 用 ``RemoveMessage`` 清理。
+
+    哨兵流经 ``messages``（入站契约 + checkpointer 持久化字段），终态必须清干净，
+    否则跨请求累积会污染后续请求的上下文与 token 预算。本字段**无 reducer**
+    （返回即替换），故每个发射节点须按 ``state.get("process_event_ids", []) + [新 id]`` 自行累加。
+    另有一道 defensive 防线：``build_context_node`` 取历史时按
+    ``additional_kwargs["jt_process"]`` 跳过哨兵。"""
 
     # === 解析后的执行数据 ===
     source_code: str

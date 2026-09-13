@@ -9,7 +9,7 @@ import re
 import time
 from typing import Literal, Any
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Send
 
@@ -345,8 +345,13 @@ def retrieve_knowledge(state: JavaTutorState) -> dict:
 
     ``rag_degraded`` 只表示**后端失败**。检索成功但 0 条越阈值时仍为 ``False``——
     那是「检索成功但无匹配」，与「检索故障」是两回事，混同会让诊断信号失真。
+
+    两条分支都发一条 ``stage`` 哨兵告知「知识库是否参与」，但**不**改上面三个字段的
+    既有返回值（哨兵走 ``messages``，与业务字段互不影响）。
     """
     from learning.knowledge import search_chunks_debug
+
+    from graphs.javatutor.process_events import with_process_events
 
     try:
         query = f"{state.get('user_question', '')} {state.get('context_summary', '')}".strip()
@@ -361,13 +366,29 @@ def retrieve_knowledge(state: JavaTutorState) -> dict:
             for c in debug["candidates"]
             if c["kept"]
         ]
-        return {"retrieved_chunks": chunks, "retrieval_debug": debug, "rag_degraded": False}
+        out = {
+            "retrieved_chunks": chunks,
+            "retrieval_debug": debug,
+            "rag_degraded": False,
+        }
+        out.update(
+            with_process_events(
+                state, [{"kind": "stage", "text": f"已检索知识库：命中 {len(chunks)} 条"}]
+            )
+        )
+        return out
     except Exception:
-        return {
+        out = {
             "retrieved_chunks": [],
             "retrieval_debug": {"candidates": []},
             "rag_degraded": True,
         }
+        out.update(
+            with_process_events(
+                state, [{"kind": "stage", "text": "知识库检索不可用，已用通用知识回答"}]
+            )
+        )
+        return out
 
 
 def _estimate_token_usage(state: JavaTutorState) -> dict:
@@ -386,18 +407,56 @@ def _estimate_token_usage(state: JavaTutorState) -> dict:
         return {"prompt_tokens": 0, "completion_tokens": 0, "estimated": True}
 
 
-def _strip_leaked_json(text: str) -> str:
-    """移除回答正文中泄露的意图/评审 JSON 片段。
+def _strip_leading_tool_json(text: str) -> str:
+    """剥掉正文**开头**的工具调用 JSON（模型可能把提案与正文连写）。
 
-    目标模式：
+    实测畸形输出（2026-09-13 联调）：模型把 ``SYSTEM_PROMPT_MAIN_AGENT`` 里逐字示范的
+    工具格式当行首前缀复述，且与紧随的标题连成一行::
+
+        {"tool": "fetch_execution_context", "args": {"file": "Main.java"}}### 当前这一步的执行内容
+
+    必须用 ``json.JSONDecoder().raw_decode`` 做**平衡解析**，不能用正则：既有规则 4 靠
+    ``$`` 锚定才成立，开头场景没有这个锚，惰性 ``.*?`` 会停在 ``args`` 嵌套 ``{}`` 的
+    **第一个** ``}``，截断后残留一个孤立的 ``}``。
+
+    判别条件是 ``obj.get("tool")`` 而非「开头是 ``{`` 就删」：【视角导航】
+    （``{"views":[...]}``）与【编辑建议】块同样以 ``{`` 开头且**必须原样透传**
+    （见本模块 ``_strip_leaked_json`` 的 docstring 与
+    ``docs/spec/2026-09-07-coze-agent-view-navigation.md``）。
+    """
+    s = text.lstrip()
+    if not s.startswith("{"):
+        return text
+    try:
+        obj, end = json.JSONDecoder().raw_decode(s)
+    except ValueError:
+        return text
+    if not (isinstance(obj, dict) and obj.get("tool")):
+        return text
+    rest = s[end:].lstrip(" \t")
+    # 剥离后若紧跟的内容不以换行开头（`}}###` 连写），补分隔换行使 `###` 回到行首、
+    # 恢复为标题；已是换行分隔则不动。后续规则 3 的 `\n{3,}` 归一会清掉多余空行。
+    return ("\n\n" + rest) if rest and not rest.startswith("\n") else rest
+
+
+def _strip_leaked_json(text: str) -> str:
+    """移除回答正文中泄露的意图/评审/工具 JSON 片段。
+
+    目标模式（按规则顺序）：
+    - 开头的 {"tool":...}（模型把工具提案与正文连写；用平衡解析，见 ``_strip_leading_tool_json``）
     - 开头的 {"intent":...,"confidence":...}
     - 任意位置的 {"pass":...,"issues":[...]}
-    这些来自中间 LLM 调用，不应出现在最终回答中。
+    - 结尾的 {"tool":...}
+    这些来自中间 LLM 调用或提案轮，不应出现在最终回答中。
 
     注意：【视角导航】块（{"views":[...]}）是受控输出指令，不以 intent/pass/tool 开头，
     不会被本函数剥离，前后端依赖其原样透传。见 docs/spec/2026-09-07-coze-agent-view-navigation.md。
     """
     import re as _re
+
+    # 0. 移除开头的工具调用 JSON（模型可能把提案与正文连写：
+    #    {"tool": "fetch_execution_context", "args": {"file": "Main.java"}}### 标题）
+    text = _strip_leading_tool_json(text)
 
     # 1. 移除开头的意图 JSON（可能被 markdown 代码块包裹）
     text = _re.sub(
@@ -406,6 +465,11 @@ def _strip_leaked_json(text: str) -> str:
         text,
         flags=_re.DOTALL,
     ).lstrip()
+
+    # 1b. 规则 1 剥掉意图 JSON 后可能**又**暴露出开头的工具 JSON，再剥一次。
+    #     规则 4 靠 `$` 锚定只管结尾，缺了这一步 `{"intent":...}\n\n{"tool":...}\n\n正文`
+    #     里的工具 JSON 会漏网（两条规则叠加的输入见 tests/test_nodes.py）。
+    text = _strip_leading_tool_json(text)
 
     # 2. 移除任意位置的评审 JSON
     text = _re.sub(
@@ -612,8 +676,16 @@ def _build_retrieval(debug: dict | None) -> dict:
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
-    返回 {"messages": [AIMessage(content=...)]} 作为唯一流式输出，
-    确保客户端只看到最终回答（含决策痕迹），不泄露中间 LLM 调用内容。
+    返回 {"messages": [AIMessage(content=...)]}，经平台 ``stream_mode="messages"`` 流出。
+
+    .. warning::
+       本函数**不是**「客户端看到的唯一输出」——初版 docstring 曾写「确保客户端只看到最终回答，
+       不泄露中间 LLM 调用内容」，**该表述与实测不符**（review 2026-09-13 §1.3）：
+       ``stream_mode="messages"`` 会把节点返回值里**所有键**的消息一起转出（``agent_messages``
+       也在内），平台 SDK 只过滤 ``langgraph_node == "tools"``，其余非 chunk 的 ``AIMessage``
+       一律转成 ``answer``。故 ``propose`` 每轮的提案都会先行流到客户端，本节点只是**再追加**
+       一条，不做任何「顶掉/替换」。本节点的真正职责是：保证**终态**回答（含决策痕迹）经
+       ``_strip_leaked_json`` / ``_redact_denied_tools`` 清洗。
     """
     answer = state.get("revised_answer") or state.get("answer") or "抱歉，我暂时无法回答这个问题。"
     answer = _normalize_md(answer)
@@ -675,7 +747,17 @@ def build_final(state: JavaTutorState) -> dict:
     }
     trace_json = _redact_denied_tools(trace_json, denied_tools)
     content = f"{answer}\n\n【决策痕迹】\n{trace_json}"
-    return {"messages": [AIMessage(content=content)], "answer": content, "decision_trace": trace}
+    # 哨兵是**流中**产物：它们必须经 messages 键流出才能到客户端，但**绝不能留在终态**——
+    # messages 是入站契约 + checkpointer 持久化字段，跨请求累积会污染上下文与 token 预算。
+    # 按发射时登记的 id 精确清除（id 唯一，不会误删本轮的正文消息）。
+    cleanup = [RemoveMessage(id=i) for i in (state.get("process_event_ids") or []) if i]
+    return {
+        "messages": [AIMessage(content=content), *cleanup],
+        "answer": content,
+        "decision_trace": trace,
+        # 清空登记表：终态不该留下「本轮发过哪些哨兵」的痕迹，否则下一请求会重复发 RemoveMessage。
+        "process_event_ids": [],
+    }
 
 
 # ── 5. 上下文构建节点 ───────────────────────────────────────────────────────────
@@ -683,12 +765,19 @@ def build_final(state: JavaTutorState) -> dict:
 
 def build_context_node(state: JavaTutorState) -> dict:
     from graphs.javatutor.context_builder import build_context
+    from graphs.javatutor.process_events import PROCESS_KWARG, with_process_events
     from graphs.javatutor.prompts import build_system_prompt
 
     # 对话历史：取当前请求之前的最近 5 条消息（当前请求已被解析进 state 字段，排除避免重复）
+    # 防线 2（defensive）：哨兵不是对话内容，先滤掉再取 5 条——即使 build_final 的
+    # RemoveMessage 清理失效，哨兵也不会跨请求污染上下文与 token 预算。
     history = []
-    messages = state.get("messages") or []
-    for msg in messages[:-1][-5:]:
+    prior = [
+        m
+        for m in (state.get("messages") or [])[:-1]
+        if not getattr(m, "additional_kwargs", {}).get(PROCESS_KWARG)
+    ]
+    for msg in prior[-5:]:
         content = getattr(msg, "content", "")
         if isinstance(content, list):
             parts = [
@@ -705,7 +794,10 @@ def build_context_node(state: JavaTutorState) -> dict:
         memories=state.get("memories") or [],
         system_instructions=build_system_prompt("other"),
     )
-    return {"context_built": text}
+    # 下一个节点即 main_agent（首次 LLM 调用），故这里可以用前瞻式的「正在…」。
+    out = with_process_events(state, [{"kind": "stage", "text": "正在分析问题…"}])
+    out["context_built"] = text
+    return out
 
 
 # ── 6. 会话工作记忆节点 ─────────────────────────────────────────────────────────

@@ -562,3 +562,265 @@ def test_graph_round_marker_tracks_next_propose(tool_rounds):
     from graphs.javatutor.harness.guard import round_marker
 
     assert round_marker(tool_rounds) == f"[当前轮次] {tool_rounds + 1}/{MAX_ROUNDS}"
+
+
+# ── 过程哨兵（Plan A Task 3）：run_tools 的 tool 事件 ─────────────────────────────
+
+
+def _sentinel_events(messages):
+    """从一批哨兵消息里取出事件（顺带断言每条都带过程标记）。"""
+    from graphs.javatutor.process_events import PROCESS_KWARG, parse_process_events
+
+    events = []
+    for m in messages:
+        assert m.additional_kwargs.get(PROCESS_KWARG) is True, "哨兵必须带 PROCESS_KWARG 标记"
+        events.extend(parse_process_events(m.content)["events"])
+    return events
+
+
+def test_run_tools_emits_tool_event_per_observation():
+    """自动前置 fetch + step_facts ⇒ 两条 tool 事件，外加一条收尾 stage。"""
+    out = run_tools_node(
+        dict(
+            STATE,
+            source_code="public class A { void f() { int x = 1; } }",
+            run_id="r1",
+            proposed_action={"tool": "step_facts", "args": {"step_index": 1}},
+            guard_decision={"policy": "P0"},
+        )
+    )
+    events = _sentinel_events(out["messages"])
+
+    tools = [e for e in events if e["kind"] == "tool"]
+    assert [e["tool"] for e in tools] == ["fetch_execution_context", "step_facts"]
+    assert events[-1] == {"kind": "stage", "text": "证据已就绪，正在生成回答…"}
+    assert len(out["process_event_ids"]) == len(out["messages"]) == len(events)
+
+
+def test_run_tools_tool_events_mirror_step_records():
+    """事件与 step_records 同源（都派生自 observations），不掺入「提案」的信息。
+
+    提案是「打算做」，观察是「已经做了」：门闩改写或自动前置 fetch 时两者会分叉，
+    故逐字对齐 step_records 才说明事件反映的是**实际执行**。
+    """
+    out = run_tools_node(
+        dict(
+            STATE,
+            source_code="public class A { void f() { int x = 1; } }",
+            run_id="r1",
+            proposed_action={"tool": "step_facts", "args": {"step_index": 1}},
+            guard_decision={"policy": "P0"},
+        )
+    )
+    tools = [e for e in _sentinel_events(out["messages"]) if e["kind"] == "tool"]
+    assert [(e["tool"], e["args"], e["status"]) for e in tools] == [
+        (r["tool"], r["args"], r["status"]) for r in out["step_records"]
+    ]
+
+
+def test_run_tools_still_emits_stage_when_no_observation_succeeded():
+    """执行失败也要给用户一个「在动」的信号，而不是干等。"""
+    out = run_tools_node(
+        dict(
+            STATE,
+            source_code="public class A {}",
+            proposed_action={"tool": "step_facts", "args": {"step_index": 99}},
+            guard_decision={"policy": "P0"},
+        )
+    )
+    events = _sentinel_events(out["messages"])
+    assert [e["status"] for e in events if e["kind"] == "tool"] == ["ok", "error"]
+    assert events[-1]["kind"] == "stage"
+
+
+def _client_stream(scripts):
+    """跑完整图并**经 SDK 的转客户端消息路径**，返回客户端看到的 ServerMessage 列表。
+
+    这是端到端取证：不过这一层就不算「进了用户可见产物」。
+    """
+    from coze_coding_utils.helper.agent_helper import agent_iter_server_messages
+
+    model = RouterModel(scripts)
+    compiled = build_flow_graph().compile()
+    items = compiled.stream(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+        stream_mode="messages",
+    )
+    return list(
+        agent_iter_server_messages(
+            items,
+            session_id="s",
+            query_msg_id="q",
+            local_msg_id="l",
+            run_id="r",
+            log_id="g",
+        )
+    )
+
+
+def _answer_deltas(server_msgs):
+    out = []
+    for sm in server_msgs:
+        content = sm.content
+        text = getattr(content, "answer", None)
+        if text:
+            out.append(text)
+    return out
+
+
+def test_sentinels_and_answer_reach_the_client_in_order():
+    """红线（端到端）：五条哨兵按序抵达客户端，且 message_end 仍在最后。"""
+    from graphs.javatutor.process_events import parse_process_events
+
+    msgs = _client_stream(
+        ['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"]
+    )
+    deltas = _answer_deltas(msgs)
+
+    events = []
+    for text in deltas:
+        events.extend(parse_process_events(text)["events"])
+    kinds = [(e["kind"], e.get("tool") or e["text"]) for e in events]
+    assert kinds == [
+        ("stage", "知识库检索不可用，已用通用知识回答"),
+        ("stage", "正在分析问题…"),
+        ("tool", "fetch_execution_context"),
+        ("tool", "step_facts"),
+        ("stage", "证据已就绪，正在生成回答…"),
+    ]
+    # 哨兵之后才是正文；收尾消息未被哨兵挤掉
+    assert any("x 变成了 2" in t for t in deltas)
+    assert msgs[-1].type == "message_end"
+    assert msgs[-1].content.message_end.code == "0"
+
+
+def test_client_stream_never_names_a_denied_tool_in_a_sentinel():
+    """红线（端到端）：**哨兵** delta 里不得出现被门闩拒绝的工具名。
+
+    哨兵绕开了 ``build_final`` 的 ``_redact_denied_tools``（它只清洗 answer 主体），
+    故这里的清白完全靠「被拒提案根本到不了 run_tools」这一不变式——本测试就是它的守卫。
+
+    注意范围：只断言**哨兵**，不含 ``main_agent`` 提案本身。提案 JSON 早就以 answer
+    delta 的形式流到客户端（见下一条测试），那是既有行为、不属于本设计引入的通道。
+    """
+    from graphs.javatutor.process_events import parse_process_events
+
+    msgs = _client_stream(['{"tool": "no_such_tool", "args": {}}'] * 3)
+    sentinel_events = []
+    for text in _answer_deltas(msgs):
+        # 提案 delta 也会被 parse 扫到事件，故只挑真带哨兵标记的那些
+        if "<!--jt:process" in text:
+            sentinel_events.extend(parse_process_events(text)["events"])
+
+    assert sentinel_events, "本轮应至少有一条哨兵（否则断言空转）"
+    assert all("no_such_tool" not in json.dumps(e, ensure_ascii=False) for e in sentinel_events)
+
+
+def test_proposal_json_delta_reaches_client_and_predates_sentinels():
+    """**记录既有事实**（非本设计引入）：``main_agent`` 的提案 JSON 以 answer delta 流给客户端。
+
+    LangGraph 的 ``stream_mode="messages"`` 会把 ``agent_messages`` 里的消息一并转出（不只
+    ``messages`` 键），平台 SDK 只过滤 ``langgraph_node == "tools"``，其余非 chunk 的
+    ``AIMessage`` 一律转成 ``answer``。被拒工具的提案因此出现在 delta 里。
+
+    .. warning::
+       本测试初版曾断言「提案 delta 会被 ``build_final`` 的整体回答**顶掉**」——**该前提已被证伪**
+       （review 2026-09-13 §1.3）：前端 ``player.js`` 是**纯累加**（``text += t``，不插分隔符、
+       无重置），全仓没有任何「顶掉」逻辑。故提案 JSON 会**留在**用户看到的正文里，
+       并与紧随的正文**粘连**成 ``}}###`` ——这正是用户报告的那个 bug（**既有**，非本两件引入）。
+       前端修复见 ``stripLeadingToolJson``；根因（提案不该随流下发）另议。
+
+    这条测试锁住现状：若将来有人收窄了流，它应当失败并促使重新评估。
+    """
+    msgs = _client_stream(
+        [
+            '{"tool": "step_facts", "args": {"step_index": 1}}',
+            "### 当前这一步的执行内容\n\nx 从 1 变成了 2。",
+        ]
+    )
+    deltas = _answer_deltas(msgs)
+
+    # ① 提案 JSON 确实以 answer delta 下发
+    assert any('{"tool": "step_facts"' in t for t in deltas)
+
+    # ② 复刻前端「纯累加 + 剥哨兵」，**粘连症状**在真实产物上复现（与用户截图同形）
+    from graphs.javatutor.process_events import parse_process_events
+
+    clean = parse_process_events("".join(deltas))["clean"]
+    assert clean.startswith(
+        '{"tool": "step_facts", "args": {"step_index": 1}}### 当前这一步的执行内容'
+    )
+
+    # ③ 终答在正文里出现**两次**（草稿 + 终稿），纯累加使二者直接粘连——review §2（P2）
+    body = clean.split("\n\n【决策痕迹】\n")[0]
+    assert body.count("### 当前这一步的执行内容") == 2
+
+    # ④ 门闩红线的**终态**仍然成立：被拒工具名不进 ``answer``（``_redact_denied_tools`` 管住）
+    out, _ = _run(['{"tool": "no_such_tool", "args": {}}'] * 5)
+
+    assert [r["policy"] for r in out["step_records"]] == ["P1"] * MAX_ROUNDS
+    assert "no_such_tool" not in out["answer"]
+
+
+# ── 过程哨兵（Plan A Task 4）：build_final 清理 ───────────────────────────────────
+
+
+def test_final_state_carries_no_process_sentinel():
+    """哨兵是流中产物：流出去了，但**不得留在终态**（messages 是入站契约 + 持久化字段）。"""
+    out, _ = _run(
+        ['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"]
+    )
+    leaked = [m for m in out["messages"] if "jt:process" in str(getattr(m, "content", ""))]
+    assert leaked == []
+    assert out.get("process_event_ids") == []
+
+
+def test_sentinels_flow_and_are_cleaned_in_the_same_run():
+    """同一轮里「流上有」与「终态无」同时成立——这是本设计的核心取舍，两条都要证。"""
+    msgs = _client_stream(
+        ['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"]
+    )
+    assert any("<!--jt:process" in t for t in _answer_deltas(msgs)), "流上必须有哨兵"
+
+    out, _ = _run(
+        ['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"]
+    )
+    assert not any("jt:process" in str(m.content) for m in out["messages"]), "终态必须没有哨兵"
+
+
+def test_second_request_on_same_thread_never_sees_first_request_sentinels():
+    """连续性守卫：同 thread 的第二轮不得看到上一轮的哨兵（否则跨请求累积）。"""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    compiled = build_flow_graph().compile(checkpointer=InMemorySaver())
+    model = RouterModel(
+        [
+            '{"tool": "step_facts", "args": {"step_index": 1}}',
+            "第一轮答案",
+            "第二轮答案",
+        ]
+    )
+    cfg = {"configurable": {"chat_model": model, "thread_id": "thread-sentinel"}}
+
+    first = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]}, config=cfg
+    )
+    assert "jt:process" not in str([m.content for m in first["messages"]])
+    # 哨兵本轮确实发过（否则上面的断言是空转）
+    assert [r["tool"] for r in first["step_records"]] == ["fetch_execution_context", "step_facts"]
+
+    second = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]},
+        config=cfg,
+    )
+    leaked = [m for m in second["messages"] if "jt:process" in str(getattr(m, "content", ""))]
+    assert leaked == [], "上一轮的哨兵不得跨请求留在 checkpointer 里"
+
+
+def test_remove_message_targets_only_registered_sentinel_ids():
+    """清理按登记 id 精确进行：正文消息（含最终回答）不得被误删。"""
+    out, _ = _run(["直接回答"])
+    contents = [str(m.content) for m in out["messages"]]
+    assert any("直接回答" in c and "【决策痕迹】" in c for c in contents), "最终回答必须还在"
+    assert out.get("process_event_ids") == []

@@ -10,78 +10,70 @@
 实现与计划一致，三处计划偏差的**自主发现与处置**记录质量高（其中两处是照计划原文落地会引入的真问题——
 一处红线、一处一等指标被静默改写）。离线交付（Task 1–8）全部到位，验证数字**独立复跑全部吻合**。
 
-**但红线修复不完整**：`reasoning.tool_calls` 侧的泄露已堵住，`reasoning[].content` 侧仍有一条
-**可经真实图触发的泄露路径**（`parse_action` 返回 `ParseError` 时原文含工具名，直接进 answer）。
-这是本次审查唯一阻断级发现（**P1**），其余为 **1 个 P3**。
+**未发现阻断级问题。** 红线（不得泄露被拒工具名）在 `Action` 与 `ParseError` 两条分支上均已堵住，
+并另有 `_redact_denied_tools` 作终局兜底；实测四种畸形输入经真实图均不泄露（见 §1.3）。
+其余为 **2 个 P3**。
+
+> **勘误（2026-09-13 补）**：本审查初稿把「`ParseError` 分支的 `content` 未剥离工具名」列为 **P1**，
+> **该结论错误，已撤回**。错因：我只在**函数层**单测了 `build_reasoning`（直接喂 `AIMessage`、
+> `executed_tools=set()`），看到 `content` 保留了原文就断言其可经真实图进入 answer，
+> **却未实跑图**。实跑后 `_redact_denied_tools`（`nodes.py:425-439`，在 trace JSON 拼进 answer 前
+> 对 `"<工具名>"` 做终局剔除）拦下了它。教训：**「函数返回什么」不等于「最终产物里有什么」**，
+> 红线类断言必须以端到端产物为准，不能在中间层取证。§1.3 保留了改正后的实测结果。
 
 ## 独立复现的验证（非引用 devlog）
 
 | 项 | 命令 | 结果 |
 |---|---|---|
-| coze | `uv run pytest tests/ -q` | **361 passed / 0 failed**（与 devlog 一致） |
+| coze | `uv run pytest tests/ -q` | **368 passed / 0 failed**（合入后重跑；初稿时 361） |
 | 前端 | `cd javatutor/frontend && npx vitest run` | **390 passed / 29 files**（与 devlog 一致） |
 | 红线两条既有守卫 | `pytest test_harness_loop.py::test_graph_unknown_tool_is_never_leaked_as_answer test_harness_termination.py::test_unknown_tool_spam_never_reaches_execution` | **2 passed** |
+| **红线端到端四种畸形输入** | 真实图跑 `SpamModel` × 4 种提案（见 §1.3） | **全部 `leak=False`** |
 | 归档接线实跑 | 读 `eval/archive/2026-09-13/round-4/summary.json` | `total=31`、`retrieval_total=17`、`mrr/hit_at_1/3/5` 均 `0.0`（与 devlog §5 一致） |
 | 诚实性核对 | `git diff` 逐文件 | 13 文件 589 增 17 删；`rag_degraded` 值未改（仅注释） |
 
-## 1. 偏差 #1 的处置 —— 手段正确，但**未覆盖全部分支**（P1）
+## 1. 红线（不得泄露被拒工具名）—— 两条分支均已堵住，**结论：通过**
 
 ### 1.1 计划原文确实会踩红线（核实成立）
 
 计划 Task 3 写「`tool_calls` 复用 `parse_action`；返回 `Action` 时取其 `tool`」。而 `decision_trace`
 是**拼进 answer 的**（`build_final` 把 trace JSON 追加到回答尾部），所以「痕迹里出现被拒工具名」
 等价于「回答里泄露被拒工具名」。两条既有守卫（`test_harness_loop.py:495`、`test_harness_termination.py:120`）
-断言 `"no_such_tool" not in out["answer"]`，照原文落地必红。**执行组的判断与两层处置都正确。**
+断言 `"no_such_tool" not in out["answer"]`，照原文落地必红。**执行组的判断与处置都正确。**
 
-### 1.2 remaining 漏洞：`ParseError` 分支的 `content` 未剥离
+### 1.2 三层防御（实测确认都在位）
 
-`_strip_tool_json` 只处理「`json.loads` 成功且 `data["tool"]` 为真」的情形；`build_reasoning` 只在
-`parse_action` 返回 **`Action`** 时调用它。但 `parse_action`（`harness/contracts.py:71-78`）对
-**`args` 不是 dict** 的输入返回 **`ParseError`**（而非 `Action`），此时：
+1. `build_reasoning` 的 `Action` 分支（`nodes.py:547-549`）：`content = _strip_tool_json(raw)`；
+2. `build_reasoning` 的 **`ParseError` 分支**（`nodes.py:550-551`）：同样走 `_strip_tool_json`。
+   函数 docstring（`nodes.py:527-529`）显式点出这条路径的危险——「``ParseError``（``args`` 不是对象等）
+   同样是提案且携带 ``tool``，**若只堵 ``Action`` 分支**，后门会重新打开」；
+3. `_redact_denied_tools`（`nodes.py:425-439`）：在 `trace_json` 拼进 answer **之前**
+   做终局剔除（`nodes.py:676`），`denied` 由 `step_records` 的 `status != "ok"` 派生。
+   该函数 docstring 明确其定位是「每条路径都记得剥离」之外的**兜底**，并说明只作用于 trace JSON 段、
+   不影响正文里作为普通词出现的同名 token。
 
-```python
-else:
-    content = raw          # ← 原文，含 {"tool":"no_such_tool","args":[...]}
-    tool_calls = []
-```
+### 1.3 端到端实测（本轮补做，取代初稿的中间层取证）
 
-`tool_calls` 正确地归 `[]`（`executed_tools` 不含它），**但 `raw` 原样进了 `content`**，而 `content`
-是用户可见痕迹、且被拼进 answer。**实测经真实图触发确认**（`SpamModel` 吐
-`{"tool":"no_such_tool","args":[1,2]}`）：
+以四种畸形提案各跑一次**完整图**（`SpamModel` + 真实 payload），断言最终 `answer`：
 
-```
-LEAK: True
-tool_calls: []
-reasoning[0].content == '{"tool":"no_such_tool","args":[1,2]}'
-snippet: ..."reasoning":[{"round":0,"content":"{\"tool\":\"no_such_tool\",\"args\":[1,2]}"...
-```
+| 模型输出 | `parse_action` 分支 | `no_such_tool` 进 answer？ |
+|---|---|---|
+| `{"tool":"no_such_tool","args":[1,2]}` | `ParseError`（args 非对象） | **否** |
+| `{"tool":"no_such_tool","args":"oops"}` | `ParseError`（args 非对象） | **否** |
+| `{"tool":"no_such_tool","args":{}}` | `Action` | **否** |
+| `{"tool":"no_such_tool"}` | `Action`（args 缺省 `{}`） | **否** |
 
-即：**`tool_calls` 堵住了，`content` 没堵住**。同一份 answer 里 `no_such_tool` 仍然出现。
+四种均 `leak=False`，`step_records` 记录 `status="denied"`（P1），`tool_calls` 为空。
+**红线成立。**
 
-- **可达性**：`args` 非 dict 是模型真实的畸形输出（这正是 P2「参数结构校验」存在的理由）；
-  `propose.py:112-117` 专门为 `ParseError` 保留 `action.tool` / `action.raw`，
-  `guard.py:53` 也专门处理 `ParseError` → 说明这是**设计内的常见路径**，不是理论边角。
-- **既有测试为何没抓到**：`test_graph_invalid_args_denied_before_execution`
-  （`test_harness_loop.py:478`）用的是 `{"args": {"bogus_key": 1}}`——`args` **是** dict，
-  走 `Action` 分支，被 `_strip_tool_json` 清空。测试用例恰好避开了 `ParseError` 路径。
-  我在 `tests/test_build_reasoning.py::test_parse_error_yields_empty_tool_calls`
-  里看到的输入 `{"tool":"step_facts","args":"oops"}` **确实会保留原文**，但该用例
-  （a）只断言 `tool_calls == []`、未断言 content 不含工具名；（b）用的是真实工具名 `step_facts`，
-  不是被拒工具名，所以没人注意到它会拼进 answer。
+### 1.4 为什么初稿判错了（教训）
 
-**处置建议**（改动很小，二选一或并用）：
+初稿只对 `build_reasoning` 做**函数级**单测（直接喂 `AIMessage`、`executed_tools=set()`），
+观察到 `ParseError` 分支的 `content` 保留了原文，就断言「可经真实图泄露」——**但没跑图**。
+实跑后第 2、3 层防御拦下了它。
 
-1. `build_reasoning`：`parse_action` 返回 `ParseError` 且 `parsed.tool` 非空时，同样走
-   `_strip_tool_json`（或直接置 `content = ""`）。语义与 `Action` 分支一致：tool 名已由
-   `step_records` 的 `denied`/`invalid_args` 承载，痕迹侧不留后门。
-2. `build_final`：在把 `trace_json` 拼进 answer 前，做一次**最终出口过滤**——
-   对 `executed_tools` 之外、任何出现过的被拒工具名（`step_records` 里 `status != "ok"` 的 `tool`）
-   做兜底剔除。这条更稳：它不依赖「每条路径都记得剥离」，对未来的新分支也成立。
-   （注意别误伤：工具名可能作为**普通词**出现在正文，剔除只应作用于 trace JSON 段。）
-
-**验收**：新增图级回归——`SpamModel('{"tool":"no_such_tool","args":[1,2]}')` 跑完整图后
-断言 `"no_such_tool" not in out["answer"]`。这条用例当前**必红**，是本次修复的靶子。
-
+**教训（已进 §5 处置清单）**：红线类结论必须**以端到端产物（answer）为取证对象**，
+「函数返回什么」不等于「最终产物里有什么」；中间层的观察只能作为**线索**，不能作为**结论**。
 ## 2. 偏差 #3（检索分母覆盖 e2e `total`）—— 处置正确（核实成立）
 
 `compute_retrieval_metrics` 的 `total`（声明 `expected_sources` 的条数 = 17）与 `summarize` 的
@@ -132,6 +124,7 @@ snippet: ..."reasoning":[{"round":0,"content":"{\"tool\":\"no_such_tool\",\"args
 
 | # | 级别 | 项 | 状态 |
 |---|---|---|---|
-| P1-1 | P1 | `ParseError` 分支的 `content` 未剥离工具名，可经真实图泄露进 answer | 待修（含图级回归靶子） |
+| ~~P1-1~~ | ~~P1~~ | ~~`ParseError` 分支的 `content` 未剥离工具名，可经真实图泄露进 answer~~ | **已撤回——误报**（初稿只做函数级取证、未跑图；实跑四种畸形输入均不泄露，见 §1.3/§1.4） |
 | P3-1 | P3 | `best_score` 依赖 fetcher 排序不变量但无断言/说明 | 待定 |
 | P3-2 | P3 | 「`extended.update` 盲并」教训只在 devlog，建议进 `dev-eval-guide.md` | 待定 |
+| L-1 | 教训 | 红线类结论须以**端到端产物**取证，不得在中间层（函数返回值）下结论 | 已记入 §1.4 |

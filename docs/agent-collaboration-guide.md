@@ -67,16 +67,81 @@ flowchart TD
 | `context_compaction` | 对话或步骤太长时压缩，控制 token | 规则 |
 | `analyze_code` | 有代码就必跑，产出复杂度、算法、数据结构标签 | 确定性 |
 | `load_session` | 读这个会话之前留下的工作记忆，按「与当前问题的相关性」挑选（候选 10 条） | 确定性 |
-| `retrieve_knowledge` | RAG 检索与问题相关的知识点，产出 `retrieved_chunks` | 确定性 |
-| `build_context` | 把系统提示、RAG 片段、记忆拼成一份上下文（不再无条件注入整段代码） | 规则 |
+| `retrieve_knowledge` | RAG 检索与问题相关的知识点，产出 `retrieved_chunks`；同时发一条 stage 哨兵 | 确定性 |
+| `build_context` | 把系统提示、RAG 片段、记忆拼成一份上下文（不再无条件注入整段代码）；同时发一条 stage 哨兵 | 规则 |
 | `main_agent` | 提一轮提案：要么给终答，要么给工具提案；轮次用尽后进入收束轮（只给终答） | LLM |
 | `guard` | 治理门闩：白名单 / 参数结构 / 轮次预算 / 文件名歧义 / 重复步骤；唯一的 HITL 暂停点 | 纯函数 |
-| `run_tools` | 执行已放行的提案，产出 Observation（渲染文本给模型 + 结构化记录给系统） | 纯函数 |
+| `run_tools` | 执行已放行的提案，产出 Observation（渲染文本给模型 + 结构化记录给系统）；每个 Observation 发一条 tool 哨兵，末尾再发一条收尾 stage | 纯函数 |
 | `critic` | 事实核查五类数字和值，防止编造 | LLM |
 | `revise` | 有错就改一轮，不无限循环 | LLM |
 | `verify` | 对最终交付文本做确定性 grounding 核对（`verification`），**只记录、不改路由** | 纯函数 |
 | `save_session` | 把本轮摘要写回记忆，供下一轮复用 | 确定性 |
-| `build_final` | 拼最终回答和 `【决策痕迹】` JSON，并透传可选的 `【视角导航】` 块 | 规则 |
+| `build_final` | 拼最终回答和 `【决策痕迹】` JSON，并透传可选的 `【视角导航】` 块；同时**清除本轮全部哨兵** | 规则 |
+
+## 过程哨兵：让执行过程在生成期间就可见
+
+**先说清事实（2026-09-13 review 更正，初版叙述有误）**：`stream_mode="messages"` 转出的是
+节点返回值里**所有键**的消息对象（**不只** `messages` 键）——`agent_messages` 走 `add_messages`
+reducer，所以 propose / guard / run_tools 的消息**本来就在流上**。平台 SDK 只过滤
+`langgraph_node == "tools"`，其余任何非 chunk 的 `AIMessage` 一律转成 `answer`
+（`SystemMessage` / `HumanMessage` 无分支，被丢弃）。**代价是这些节点的原生产出
+（提案 JSON、观察文本）会以原始形态混进用户可见的 `answer` 累加流**——
+这正是用户报告的「回答顶端裸工具 JSON」的根因（见
+`docs/reviews/2026-09-13-process-streaming-and-strip-leading-tool-json-review.md` §1）。
+
+哨兵要解决的不是「打开一条不存在的通道」，而是**给过程事实一个可渲染的表示**，
+并让前端在渲染前把非同类的原生产出剥掉。
+
+**格式**：`\n<!--jt:process {json}-->\n`。用 HTML 注释是关键取舍——即使前端**未**拦截
+（老前端 + 新 Agent），markdown 渲染器也不会把它渲染出来
+（实测 `renderMarkdown` 的自定义 renderer `html()` 返回空串，即**丢弃**）。
+**最坏情况是「没有进度条」，而不是「界面上一堆乱码」。**
+负载里的 `-->` 会在构造侧转义（否则解析的正则提前截断）；
+**两端 `\n` 是承重的**——marked 的 HTML 块规则会吞掉注释后同一行的剩余正文。
+
+**两个 `kind`**（开放集合，将来加 `reasoning` / `retrieval` 不必改协议）：
+
+| kind | 语义 | 形状 |
+| --- | --- | --- |
+| `stage` | **覆盖式**：界面只显示最新一条 | `{"kind":"stage","text":"正在分析问题…"}` |
+| `tool` | **追加式**：界面累积成列表 | `{"kind":"tool","tool":"…","args":{…},"status":"ok","latency_ms":120.5}` |
+
+**三个发射点**：`retrieve_knowledge`（成功 `已检索知识库：命中 N 条` / 降级 `知识库检索不可用，已用通用知识回答`）、
+`build_context`（`正在分析问题…`）、`run_tools`（逐 Observation 一条 tool + 收尾 `证据已就绪，正在生成回答…`）。
+
+**红线：事件只从 `observations` 派生，绝不从 `proposed_action` 取。** 提案是「打算做」，
+观察是「已经做了」，门闩改写参数或自动前置 fetch 时两者会分叉。被拒的提案根本到不了
+`run_tools`，故哨兵里只可能出现白名单工具名——这条不变式由
+`tests/test_harness_loop.py::test_client_stream_never_names_a_denied_tool_in_a_sentinel`
+经 **SDK 转客户端消息的完整路径**守着（哨兵绕开了 `build_final` 的 `_redact_denied_tools`，
+它只清洗 answer 主体）。
+
+**状态卫生（两道防线）**：
+
+1. **权威**：发射节点把哨兵 id 记进 `process_event_ids`，`build_final` 用 `RemoveMessage` 精确清除。
+   哨兵必须经 `messages` 流出，但 `messages` 是入站契约 + checkpointer 持久化字段，
+   留在终态会跨请求累积、污染上下文与 token 预算。
+2. **兜底**：`build_context_node` 取历史时按 `additional_kwargs["jt_process"]` 跳过哨兵——
+   即使防线 1 失效，哨兵也进不了下一轮的上下文。
+
+id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，跨请求靠时间戳唯一。
+`seq` 由调用方**显式**给出（`with_process_events` 按 `len(process_event_ids) + i` 算），
+不能让每条事件各自用 `len(process_event_ids)`——那样一批事件会算出同一个 id，
+`add_messages` 只留最后一条，前面的静默丢失。
+
+**⚠ 节点名约束**：哨兵能出流，**取决于 `run_tools` 不叫 `tools`**。SDK 里有一条
+`if meta["langgraph_node"] == "tools": return []`（针对 LangGraph 标准 ReAct 的 `tools` 节点名）。
+本仓注册为 `run_tools`，**恰好不匹配**。若改名成 `tools`，`run_tools` 的哨兵会被 SDK
+**静默吞掉**（表现为进度区停住，且无任何报错）。见 `harness/tools_node.py` 的注释。
+
+**前端侧配套**：哨兵在**渲染前**由 `src/utils/processEvents.js` 剥掉；
+**开头被纯累加粘上的裸工具 JSON**（提案 delta）由
+`src/utils/editSuggestion.js::stripLeadingToolJson` 剥掉（**循环**剥，判别收在 `tool` 键上，
+故【视角导航】/【编辑建议】块不受影响）。两者接入 `AiTutorPanel` 的流式渲染、
+`splitDecisionTrace` 与 `parseAssistantMessage`，所以流中与终态都不漏。
+
+实现见 `src/graphs/javatutor/process_events.py`（构造 / 解析 / 消息包装，不 import 任何图内模块），
+设计见 `docs/spec/2026-09-13-process-streaming-design.md`。
 
 ## 输入输出
 
@@ -102,6 +167,9 @@ flowchart TD
 
   `rag_degraded` 语义不变：**仅在后端失败时为 `true`**；「检索成功但 0 条越阈值」不置位（那是「无匹配」而非「故障」，混同会让诊断信号失真）。
 
+  终态回答里**不含**过程哨兵：哨兵只在生成期间作为 delta 流出（见「过程哨兵」小节），
+  由 `build_final` 清除。前端需在**渲染前**拦下并剥离，剥离后的正文与不带哨兵时逐字相等。
+
 图内循环新增的状态字段（`state.py`，均为增量，不改动既有字段语义）：
 
 - `agent_messages`：主 Agent 循环的**累积**消息序列（System / Human / AI / Human…）。与 `messages` 分开——后者是入站契约（`parse_context` 读其最后一条，平台 `stream_mode="messages"` 与它耦合），不能被循环过程污染。
@@ -112,6 +180,9 @@ flowchart TD
 - `fetched_injected`：本请求是否已把执行上下文读进 state（自动前置 fetch 或模型显式 fetch 都会置位）。
 - `verification`：`verify` 节点的确定性 grounding 核对结果。
 - `retrieval_debug`：RAG 全量候选与阈值判定（含被滤掉的候选），供 `retrieval` 痕迹与诊断使用。与 `retrieved_chunks`（越阈值结果）分开；检索失败时仍存在（`candidates == []`），以区别「失败」与「成功但无匹配」。
+- `process_event_ids`：本请求发射的过程哨兵消息 id，供 `build_final` 用 `RemoveMessage` 清理。
+  **无 reducer（返回即替换）**，故每个发射节点须按 `state.get("process_event_ids", []) + [新 id]` 自行累加。
+  终态被清空。详见「过程哨兵」小节。
 
 ## 上手三件事
 

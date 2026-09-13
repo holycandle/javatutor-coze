@@ -28,7 +28,12 @@
 | 联调修复 review（自动返修 + 测试模式上下文） | 已处理（1 P2 / 6 P3 全部处置；2 条建议未采纳并附理由，见两份 devlog §8） |
 | RAG 可观测性 + 痕迹过程化 spec | 已定稿 |
 | RAG 可观测性 + 痕迹过程化 plan | 已执行（Task 1–8 离线全绿；Task 9 重发取数待合入窗口） |
-| RAG 可观测性 + 痕迹过程化 review | 已审查（1 P1 / 2 P3）**已全部处置**：P1 `ParseError` 分支 content 泄露两层堵 + 终局兜底；P3-1 `best_score` 改取最高分；P3-2 盲并教训进指南 |
+| RAG 可观测性 + 痕迹过程化 review | 已审查（**0 阻断 / 2 P3**；初稿的 P1 系误报，已撤回并附教训：红线类结论须以端到端产物取证） |
+| 回答裸 JSON 剥离计划 | 已执行（离线全绿；规则 0 调两次以覆盖「意图 JSON 剥出工具 JSON」的用例） |
+| 过程式输出 spec（阶段 + 工具调用实时可见） | 已定稿 |
+| 过程式输出计划 | 已执行（Task 1–8 离线全绿；L4 本地冒烟 SKIP，首屏实测待重发联调窗口） |
+| 裸 JSON 剥离 + 过程式输出 review | 已审查（**1 P1 / 1 P2 / 2 P3**）：哨兵特性成立且按要求流出；但**剥离未命中报告 bug 的根因**——症状主因是既有「提案 JSON 随 `answer` delta 流出 + 前端纯累加」，剥离作用于 `state["answer"]` 够不到流；连带 spec §5-6 红线验收为**假绿**（全流确含被拒工具名），故 devlog §3.2 #6 须由 ✅ 改 ❌ |
+| 裸 JSON 剥离 + 过程式输出 review | 已审查（**1 P1 / 1 P2 / 2 P3**）：哨兵特性成立且按要求流出；但**剥离未命中报告 bug 的根因**——症状主因是既有「提案 JSON 随 `answer` delta 流出 + 前端纯累加」，剥离作用于 `state["answer"]` 够不到流；连带 spec §5-6 红线验收为**假绿**（全流确含被拒工具名），故 devlog §3.2 #6 须由 ✅ 改 ❌ |
 
 ## 规约与文档索引
 
@@ -88,7 +93,14 @@
 | RAG 可观测性 + 痕迹过程化设计 | `docs/spec/2026-09-13-rag-observability-and-trace-process-design.md` | 先让静默瘫痪四轮的 RAG 可见（暴露全量候选 + 指标进 summary），再把决策痕迹升级为完整过程（`retrieval` / `reasoning` / `sources` 增强） |
 | RAG 可观测性 + 痕迹过程化计划 | `docs/plan/2026-09-13-rag-observability-and-trace-process-plan.md` | 上述设计的 TDD 实施计划（Task 1–8 离线交付，Task 9 重发取数属合入窗口） |
 | RAG 可观测性 + 痕迹过程化实现 | `docs/devlog/2026-09-13-rag-observability-and-trace-process.md` | `search_chunks_debug` + `retrieval_debug` + `retrieval`/`reasoning` trace + 检索指标进 summary + 前端「思考过程」（coze 368 / 前端 390，3 处计划偏差含不得泄露红线修正与检索分母覆盖 `total` 的修复；review 1 P1 / 2 P3 处置见 §8：`ParseError` 分支 content 泄露两层堵 + 终局兜底 `_redact_denied_tools`、`best_score` 改取最高分、盲并教训进指南） |
-| RAG 可观测性 + 痕迹过程化 review | `docs/reviews/2026-09-13-rag-observability-and-trace-process-review.md` | 执行审查（**1 P1 / 2 P3**）：红线修复不完整——`ParseError` 分支的 `reasoning[].content` 仍含工具名，实测经真实图泄露进 answer（`tool_calls` 侧已堵、`content` 侧未堵）；P3-1 `best_score` 依赖 fetcher 排序无断言；P3-2 盲并教训未进指南 |
+| RAG 可观测性 + 痕迹过程化 review | `docs/reviews/2026-09-13-rag-observability-and-trace-process-review.md` | 执行审查（**0 阻断 / 2 P3**）：红线（不得泄露被拒工具名）经端到端实测四种畸形输入**均不泄露**，三层防御在位；P3-1 `best_score` 依赖 fetcher 排序无断言；P3-2 盲并教训未进指南。**初稿曾把「`ParseError` 分支 content 未剥离」误判为 P1，已撤回**——错因是只做函数级取证未跑图，§1.4 记教训 |
+| 裸 JSON 剥离 + 过程式输出 review | `docs/reviews/2026-09-13-process-streaming-and-strip-leading-tool-json-review.md` | 两件执行审查（**1 P1 / 1 P2 / 2 P3**）：P1 系报告 bug 根因未命中——`main_agent` 提案 `AIMessage` 经 SDK 转成 `answer` delta，被前端 `player.js:521` 纯累加后粘在正文前（端到端复现出与截图同形产物），剥离函数在 `nodes.py:685` 只作用于 `state["answer"]`；连带 spec §5-6 红线为假绿。哨兵通道本身红线守住，4 处计划偏差均为改进 |
+| 回答裸 JSON 剥离计划 | `docs/plan/2026-09-13-strip-answer-leading-tool-json-plan.md` | 回答正文顶端裸工具 JSON + 标题不换行的修复：`_strip_leaked_json` 增「开头 `{"tool"}`」规则（用 `json.JSONDecoder().raw_decode` 平衡解析，惰性正则会在 `args` 嵌套 `{}` 处提前截断）+ 提示词上游约束；含导航/编辑建议块不回归与端到端红线用例 |
+| 过程式输出设计 | `docs/spec/2026-09-13-process-streaming-design.md` | 「流中哨兵」：业务节点把已发生的事实（阶段/工具调用）作为 HTML 注释哨兵放进 `messages`，借既有 `stream_mode="messages"` 通道流出，Java 代理与前端的 `event:chunk` 原样透传——**零外壳、零 Java、零协议变更**；含状态卫生（`RemoveMessage` + 历史过滤）与被拒工具名红线 |
+| 过程式输出计划 | `docs/plan/2026-09-13-process-streaming-plan.md` | 上述设计的 TDD 实施计划（coze Task 1–5 / 前端 Task 6–7 / 端到端 Task 8）；明确不流 `reasoning`（恒空串）与 RAG 明细（生产侧恒空），只流真实存在的事实 |
+| 回答裸 JSON 剥离实现 | `docs/devlog/2026-09-13-strip-answer-leading-tool-json.md` | `_strip_leading_tool_json`（`raw_decode` 平衡解析）+ 规则 0/1b + `SYSTEM_PROMPT_MAIN_AGENT` 两句约束（coze 407，1 处计划偏差：规则 0 须在规则 1 后再调一次，否则计划自身的用例 #6 必失败）。**review 更正**：本件是**终态产物侧的正确加固**，但**未命中**用户所报症状的根因（见 §7） |
+| 过程式输出实现 | `docs/devlog/2026-09-13-process-streaming.md` | 「流中哨兵」`<!--jt:process {json}-->` 借 `stream_mode="messages"` 出流（零外壳/零 Java/零协议变更）；三发射点 + `RemoveMessage`/历史过滤两道卫生防线 + 前端实时进度区（coze 407 / 前端 431，L5 外壳 0 命中；4 处计划偏差含 `renderMarkdown` 实为**丢弃**哨兵、同批 id 重复静默丢事件；L4 SKIP 且首屏 18s 对照为推演非实测）。**review 处置见 §5**：P1 前端 `stripLeadingToolJson` 已实施并端到端取证、红线 #6 改 ❌、P2 未修但已用测试钉住、2 P3 已改 |
+| 裸 JSON 剥离 + 过程式输出 review | `docs/reviews/2026-09-13-process-streaming-and-strip-leading-tool-json-review.md` | 执行审查（**1 P1 / 1 P2 / 2 P3**，已全部处置）：独立复跑 coze 407 / 前端 431 与 devlog 吻合，4 处计划偏差**全判为改进**（规则 1b 补的是计划自身代码片段的漏洞）；P1 报告 bug 根因未命中 + 红线 #6 假绿（**既有**违规）→ 前端 `stripLeadingToolJson` 修复；P2 终答下发两次（同根因，用户选定最小修复故未修，已钉住）；P3 节点名 `run_tools` 与 SDK `tools` 过滤器隐式耦合、哨兵不跨 chunk 属假定 → 均已改 |
 
 ## 文档规范
 

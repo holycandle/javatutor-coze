@@ -86,7 +86,14 @@ System → Human → AI → Human → AI → ...   （tools_node.py:161-166 的�
 ### 2.4 体积与截断
 
 `build_final` 是「唯一流式输出」节点（`nodes.py:469-470` 的 docstring 明确），中间内容不会外泄，
-所以「不流式」是天然满足的。但 `reasoning` 会显著放大回答尾部（当前 trace 约 600 字符，
+所以「不流式」是天然满足的。
+
+> **2026-09-13 review 更正**：「唯一流式输出」「中间内容不会外泄」**不成立**
+> （见 `docs/reviews/2026-09-13-process-streaming-and-strip-leading-tool-json-review.md` §1.1）：
+> `stream_mode="messages"` 会转出节点返回值里**所有键**的消息，`agent_messages` 在内，
+> 故 `propose` 的提案 JSON 等中间内容**确实会**流到客户端。
+> 本节的**结论不受影响**——`reasoning` 只进 `decision_trace`（回答尾部），
+> 不需要、也没有被单独流式推送。但 `reasoning` 会显著放大回答尾部（当前 trace 约 600 字符，
 加 2–3 轮思考可能到 3–5 KB）。需显式截断并**记录截断标志**，不做静默裁剪。
 
 ## 3. 设计方案

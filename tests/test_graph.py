@@ -314,3 +314,127 @@ def test_build_context_includes_ontology():
     assert "变量卡片" in text
     assert "堆面板" in text
     assert "禁止编造引擎内部机制" in text
+
+
+# ── 过程哨兵（Plan A Task 2）：build_context / retrieve_knowledge 发射 ──────────────
+
+
+def _sentinel_events(msg):
+    """取一条哨兵消息里的事件列表（顺带断言它确实被标记为过程消息）。"""
+    from graphs.javatutor.process_events import PROCESS_KWARG, parse_process_events
+
+    assert msg.additional_kwargs.get(PROCESS_KWARG) is True, "哨兵必须带 PROCESS_KWARG 标记"
+    return parse_process_events(msg.content)["events"]
+
+
+def test_retrieve_knowledge_emits_stage_with_hit_count(monkeypatch):
+    """成功分支：stage 文本里的命中数**等于越阈值条数**（不是候选条数）。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    rows = [("知识库: A", 0, "内容A", 0.8), ("知识库: B", 0, "内容B", 0.2)]
+    monkeypatch.setattr(kb, "_raw_rows", lambda *a: rows)
+
+    out = retrieve_knowledge({"user_question": "HashMap.get 原理", "context_summary": ""})
+
+    assert _sentinel_events(out["messages"][0]) == [
+        {"kind": "stage", "text": "已检索知识库：命中 1 条"}
+    ]
+    assert len(out["process_event_ids"]) == len(out["messages"])
+    # 既有语义不变
+    assert [c["source"] for c in out["retrieved_chunks"]] == ["知识库: A"]
+    assert out["rag_degraded"] is False
+
+
+def test_retrieve_knowledge_emits_zero_hit_stage_not_degraded(monkeypatch):
+    """kept==0：文本说 0 条，但仍**不是**降级（「无匹配」≠「故障」）。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    monkeypatch.setattr(kb, "_raw_rows", lambda *a: [("知识库: A", 0, "内容A", 0.28)])
+    out = retrieve_knowledge({"user_question": "查询", "context_summary": ""})
+
+    assert _sentinel_events(out["messages"][0]) == [
+        {"kind": "stage", "text": "已检索知识库：命中 0 条"}
+    ]
+    assert out["rag_degraded"] is False
+
+
+def test_retrieve_knowledge_degraded_branch_emits_stage(monkeypatch):
+    """降级分支也必须发哨兵，且三个业务字段一字不变。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    def boom(*a):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(kb, "_raw_rows", boom)
+    out = retrieve_knowledge({"user_question": "查询", "context_summary": ""})
+
+    assert _sentinel_events(out["messages"][0]) == [
+        {"kind": "stage", "text": "知识库检索不可用，已用通用知识回答"}
+    ]
+    assert out["retrieved_chunks"] == []
+    assert out["retrieval_debug"]["candidates"] == []
+    assert out["rag_degraded"] is True
+
+
+def test_retrieve_knowledge_accumulates_process_event_ids(monkeypatch):
+    """process_event_ids 无 reducer（返回即替换），节点须自行累加以往 id。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    monkeypatch.setattr(kb, "_raw_rows", lambda *a: [("知识库: A", 0, "内容A", 0.8)])
+    out = retrieve_knowledge(
+        {"user_question": "查询", "context_summary": "", "process_event_ids": ["jt-proc-x-0"]}
+    )
+    assert out["process_event_ids"][0] == "jt-proc-x-0"
+    assert len(out["process_event_ids"]) == 2
+
+
+def test_build_context_node_emits_stage_and_ids():
+    from graphs.javatutor.nodes import build_context_node
+
+    out = build_context_node(
+        {"user_question": "arr 怎么变了？", "source_code": "public class A {}", "messages": []}
+    )
+    assert _sentinel_events(out["messages"][0]) == [
+        {"kind": "stage", "text": "正在分析问题…"}
+    ]
+    assert out["process_event_ids"] == [out["messages"][0].id]
+    assert out["messages"][0].id.startswith("jt-proc-")
+    assert "变量卡片" in out["context_built"]
+
+
+def test_build_context_node_skips_process_sentinels_in_history(monkeypatch):
+    """防线 2：哨兵不是对话内容，取历史时必须滤掉，否则会进 context_built 的 token 预算。"""
+    import graphs.javatutor.context_builder as cb
+    from graphs.javatutor.nodes import build_context_node
+    from graphs.javatutor.process_events import PROCESS_KWARG, build_process_event
+
+    captured = {}
+
+    def spy(state, history=None, memories=None, system_instructions="", max_tokens=None):
+        captured["history"] = history
+        return "STUB"
+
+    monkeypatch.setattr(cb, "build_context", spy)
+
+    sentinel = AIMessage(
+        content=build_process_event({"kind": "stage", "text": "正在分析问题…"}),
+        additional_kwargs={PROCESS_KWARG: True},
+    )
+    state = {
+        "user_question": "现在的问题",
+        "messages": [
+            HumanMessage(content="上一轮的问题 余量标记ZZZ"),
+            sentinel,
+            HumanMessage(content="本轮提问占位"),
+        ],
+    }
+    out = build_context_node(state)
+
+    contents = [h["content"] for h in captured["history"]]
+    assert "上一轮的问题 余量标记ZZZ" in contents, "正常历史不得被误滤"
+    assert not any("jt:process" in c for c in contents), "哨兵不得进历史"
+    assert "jt:process" not in out["context_built"]
