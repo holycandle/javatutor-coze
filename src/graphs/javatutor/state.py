@@ -68,7 +68,15 @@ class JavaTutorState(TypedDict, total=False):
     """意图分类置信度 0-1."""
 
     retrieved_chunks: list[dict]
-    """RAG 检索到的知识库片段."""
+    """RAG 检索到的知识库片段（**只含越阈值者**，消费方语义不变）."""
+
+    retrieval_debug: dict
+    """RAG 全量候选与阈值判定，供决策痕迹诊断。
+
+    与 ``retrieved_chunks``（越阈值结果）分开：前者含**被阈值滤掉的候选**，
+    使「没召回到」与「召回到但被阈值滤掉」在 trace 里可区分。检索失败时仍存在
+    （``candidates == []``），以区别「失败」与「成功但无匹配」。
+    """
 
     context_summary: str
     """上下文压缩摘要."""

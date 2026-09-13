@@ -1,0 +1,62 @@
+{
+  "e2e": {
+    "avg_score": 3.75,
+    "grounding_avg": 3.7097,
+    "total": 31,
+    "correct": 17,
+    "partially_correct": 14,
+    "incorrect": 0,
+    "judge_fallback_rate": 0.0,
+    "empty_output_rate": 0.0,
+    "tool_call_accuracy": 0.871,
+    "task_success_rate": 0.3871,
+    "avg_latency": 14.045,
+    "avg_token_usage": 3026.8,
+    "token_usage_sample_count": 29,
+    "grounding_verify_applicable": 17,
+    "grounding_verify_checked": 37,
+    "grounding_verify_violations": 0,
+    "grounding_verify_accuracy": 1.0,
+    "mrr": 0.0,
+    "hit_at_1": 0.0,
+    "hit_at_3": 0.0,
+    "hit_at_5": 0.0,
+    "retrieval_total": 17,
+    "tool_call_by_tool": {
+      "fetch_execution_context": {
+        "expected": 16,
+        "called": 12,
+        "correct": 12,
+        "accuracy": 0.75,
+        "unexpected": 0
+      },
+      "step_facts": {
+        "expected": 16,
+        "called": 12,
+        "correct": 12,
+        "accuracy": 0.75,
+        "unexpected": 0
+      }
+    }
+  },
+  "component": {},
+  "diff_vs_previous": {
+    "avg_score": 0.7097,
+    "grounding_avg": 1.1936,
+    "component_pass_rate": 0
+  },
+  "changes": {
+    "since": "2026-09-08 round-3",
+    "agent_changes": [
+      "2026-09-09 Coze Agent 视角导航 健壮性修复（裸 JSON / 算法库细化 / 非面板流程知识）（2026-09-09）",
+      "2026-09-10 Coze Agent 代码优化（优化卡 + 报错预填）（2026-09-10）",
+      "2026-09-10 优化方向绑定（多选 + 硬约束）与报错入口全局化（2026-09-10）",
+      "2026-09-10 对话时间线（运行不清空对话 + 记录点回退）（2026-09-10）",
+      "2026-09-11 开发日志：Agent Harness 工程——图内真环 + 治理门闩 + HITL 内核（2026-09-11）",
+      "2026-09-12 优化候选门禁失败后自动返修 — 实施记录",
+      "2026-09-12 测试模式误诊修复 — 实施记录",
+      "2026-09-13 RAG 检索可观测性 + 决策痕迹过程化 — 实施记录"
+    ],
+    "eval_changes": []
+  }
+}

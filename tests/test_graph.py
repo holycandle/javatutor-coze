@@ -125,6 +125,67 @@ def test_retrieve_knowledge_node_empty_query():
     assert out["retrieved_chunks"] == []
 
 
+# ── retrieval_debug：全量候选与阈值判定写入 state（供决策痕迹诊断）──────────────
+
+
+def test_retrieve_knowledge_writes_retrieval_debug(monkeypatch):
+    """成功分支必须同时写 retrieved_chunks（语义不变）与 retrieval_debug（全量候选）。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    rows = [
+        ("知识库: A", 0, "内容A", 0.8),
+        ("知识库: B", 0, "内容B", 0.2),
+    ]
+
+    def fake_raw(query, top_k, embedder, fetcher):
+        return rows
+
+    monkeypatch.setattr(kb, "_raw_rows", fake_raw)
+    out = retrieve_knowledge({"user_question": "HashMap.get 原理", "context_summary": ""})
+
+    debug = out["retrieval_debug"]
+    for key in ("query", "candidates", "best_score", "kept"):
+        assert key in debug, f"retrieval_debug 缺 {key}"
+    # 被阈值滤掉的行也必须在痕迹里
+    assert len(debug["candidates"]) == 2
+    assert debug["candidates"][1]["kept"] is False
+    assert out["rag_degraded"] is False
+    # 既有语义不变：retrieved_chunks 仍只含越阈值者
+    assert [c["source"] for c in out["retrieved_chunks"]] == ["知识库: A"]
+
+
+def test_retrieve_knowledge_debug_distinguishes_filtered_from_empty(monkeypatch):
+    """核心诊断目标：检索成功但 0 条越阈值时，rag_degraded 仍为 False 且候选非空。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    monkeypatch.setattr(kb, "_raw_rows", lambda *a: [("知识库: A", 0, "内容A", 0.28)])
+    out = retrieve_knowledge({"user_question": "查询", "context_summary": ""})
+
+    assert out["retrieved_chunks"] == []
+    assert out["rag_degraded"] is False, "「检索成功但无匹配」不得被当成降级"
+    assert out["retrieval_debug"]["candidates"], "kept==0 时候选仍须非空"
+    assert out["retrieval_debug"]["best_score"] == 0.28
+    assert out["retrieval_debug"]["kept"] == 0
+
+
+def test_retrieve_knowledge_failure_keep_debug_field(monkeypatch):
+    """后端失败时字段仍存在（空候选 + degraded=True），便于区分「失败」与「成功但空」。"""
+    import learning.knowledge as kb
+    from graphs.javatutor.nodes import retrieve_knowledge
+
+    def boom(*a):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(kb, "_raw_rows", boom)
+    out = retrieve_knowledge({"user_question": "查询", "context_summary": ""})
+
+    assert out["rag_degraded"] is True
+    assert out["retrieved_chunks"] == []
+    assert out["retrieval_debug"]["candidates"] == []
+
+
 def test_full_flow_runs_new_pipeline():
     """全流程: 新链路 parse → analyze → memory → context → main_agent → critic → revise → final."""
     import json

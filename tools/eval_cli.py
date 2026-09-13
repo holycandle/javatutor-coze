@@ -117,12 +117,20 @@ def cmd_report(args) -> int:
         write_report,
         write_summary,
     )
+    from eval.runner.retrieval_metrics import compute_retrieval_metrics
 
     samples = load_jsonl(GOLDEN_SET)
     outputs = load_jsonl(args.round_dir / "answers.jsonl")
     judged = load_jsonl(args.round_dir / "judged.jsonl")
     extended = compute_extended_metrics(outputs, samples, judged)
     extended.update(compute_grounding_verify(outputs, samples))
+    # RAG 检索指标必须进 summary：此前只存在于 `retrieval` 子命令，导致
+    # 「sources 恒空」这类退化在 summary.json 里完全不可见（四轮无人知）。
+    # `total` 是检索的**分母**（声明 expected_sources 的条数），与 e2e 的样本数同名不同义——
+    # 直接 update 会覆盖 e2e["total"]（实测把 31 改成了 17），故改名后再并入。
+    retrieval = compute_retrieval_metrics(outputs, samples)
+    retrieval["retrieval_total"] = retrieval.pop("total")
+    extended.update(retrieval)
     extended["tool_call_by_tool"] = compute_per_tool_metrics(outputs, samples)
     summary = summarize(judged, component=None, extended=extended)
     previous = resolve_previous_summary(args.round_dir)

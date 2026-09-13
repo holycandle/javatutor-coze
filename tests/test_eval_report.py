@@ -447,3 +447,69 @@ def test_per_tool_metrics_missing_fetch_surfaces_as_low_accuracy():
     assert m["fetch_execution_context"]["accuracy"] == 0.0
     assert m["fetch_execution_context"]["unexpected"] == 0
     assert m["step_facts"]["correct"] == 1
+
+
+# ── 检索指标接线（e2e 内出现四档 RAG 指标，防「指标烂了无人知」）─────────────
+
+
+def test_report_wires_retrieval_metrics_into_extended():
+    """cmd_report 的 extended 组装必须并入 compute_retrieval_metrics。
+
+    `tools/` 无 `__init__.py`（非包），按路径加载模块。
+    `cmd_report` 需真实归档才能端到端跑，故此处只断言源码层面确实调用了该函数。
+    """
+    import importlib.util
+    import inspect
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("eval_cli_under_test", root / "tools" / "eval_cli.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    src = inspect.getsource(cli.cmd_report)
+    assert "compute_retrieval_metrics" in src
+
+
+def test_retrieval_metrics_values_match_direct_call():
+    from eval.runner.retrieval_metrics import compute_retrieval_metrics
+
+    samples = [
+        {"id": "q01", "expected_sources": ["知识库: A"]},
+        {"id": "q02", "expected_sources": ["知识库: B"]},
+        {"id": "q03"},  # 无 expected_sources → 不计入分母
+    ]
+    outputs = [
+        {"id": "q01", "decision_trace": {"sources": [{"source": "知识库: A", "score": 0.9}]}},
+        {"id": "q02", "decision_trace": {"sources": [{"source": "知识库: C", "score": 0.9}]}},
+        {"id": "q03", "decision_trace": {"sources": [{"source": "知识库: A", "score": 0.9}]}},
+    ]
+    metrics = compute_retrieval_metrics(outputs, samples)
+    assert metrics["total"] == 2, "无 expected_sources 的样本不计入分母"
+    # MRR 只对命中项求均值（q01 命中 rank 1 → 1.0），hit@k 才对全体分母取率
+    assert metrics["mrr"] == 1.0
+    assert metrics["hit_at_1"] == 0.5
+    assert metrics["hit_at_3"] == 0.5
+    assert metrics["hit_at_5"] == 0.5
+
+
+def test_report_does_not_clobber_e2e_total_with_retrieval_denominator():
+    """检索分母 (expected_sources 条数) 不得覆盖 e2e 的样本数 total。
+
+    两个 `total` 同名不同义：e2e 的是判分样本数（judgement 非兜底），检索的是
+    声明了 `expected_sources` 的样本数。直接 `extended.update(...)` 会用后者盖掉前者
+    （实测把 31 改成 17），而 `total` 是 `_E2E_METRIC_ORDER` 首位指标且被合入门槛读取。
+    """
+    import importlib.util
+    import inspect
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("eval_cli_under_test", root / "tools" / "eval_cli.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    src = inspect.getsource(cli.cmd_report)
+    # 检索结果的 `total` 在并入 extended 前必须改名，否则覆盖 e2e["total"]。
+    assert 'retrieval["retrieval_total"] = retrieval.pop("total")' in src
+    assert "extended.update(compute_retrieval_metrics" not in src, "不得把检索 total 直接并进 e2e"

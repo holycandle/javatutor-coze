@@ -64,9 +64,9 @@ uv run python tools/eval_cli.py --round-dir eval/archive/2026-08-17/round-1 expo
 
 每轮目录 `eval/archive/<date>/round-<n>/`：
 
-- `answers.jsonl`：`id`、`answer`、`latency`、`decision_trace`（含 `tool_calls`、`token_usage`、`sources`、`latency_ms`）。
+- `answers.jsonl`：`id`、`answer`、`latency`、`decision_trace`（含 `tool_calls`、`token_usage`、`sources`、`latency_ms`、`retrieval`、`reasoning`）。
 - `judged.jsonl`：`id`、`score`、`judgement`、`scores.{relevance,grounding,pollution,correctness}`、`reason`、`raw_judge_output`、`attempts`、`judge_fallback`、`empty_output`、`error`。
-- `summary.json`：`e2e` 汇总与 `diff_vs_previous`。
+- `summary.json`：`e2e` 汇总（含四档检索指标与 `retrieval_total`）与 `diff_vs_previous`。
 - `human_review.jsonl`：执行 `review` 后生成。
 
 ## 5. 怎么看 `raw_judge_output`
@@ -103,10 +103,26 @@ uv run python -c "import json;from pathlib import Path;p=Path('eval/archive/2026
 - `avg_latency`：远程端到端平均耗时。
 - `avg_token_usage`：prompt+completion 平均 token。
 - `grounding_verify_applicable` / `checked` / `violations` / `accuracy`：确定性 grounding 核对（不依赖 LLM）。基于本体数据契约规则，程序化验证回答的步骤号/行号/堆对象 id 是否在 steps 数据中真实存在；accuracy = 无违规样本数 / applicable 样本数，仅统计含非空 steps 的样本，可与 Judge 的 `grounding_avg` 交叉对照。
+- `mrr` / `hit_at_1` / `hit_at_3` / `hit_at_5`：RAG 检索四档指标。**`report` 已并入**（2026-09-13 起），与 `tool_call_by_tool` 同层写入 `summary.json` 的 `e2e`。此前这四档只存在于 `retrieval` 子命令、不进 summary，导致「RAG 静默退化」在 `summary.json` 里完全不可见——这是接线而非新增指标，`retrieval` 子命令保留（独立排查用）。
+- `retrieval_total`：**检索侧的分母**——黄金集中声明 `expected_sources` 的条数。注意它与 `e2e.total`（判分样本数）**同名不同义**，故并入 summary 时改名为 `retrieval_total`；`retrieval` 子命令输出的仍叫 `total`（那是一个独立指标集，无歧义）。
+
+### 给 `summary.json` 新增扩展指标时（重要陷阱）
+
+`cmd_report` 的组装是 `extended.update(compute_xxx(...))`——这是**盲并**：任何与 `e2e` 既有键
+同名的返回键会**静默覆盖**既有指标，且不会有任何报错。实际发生过一次：`compute_retrieval_metrics`
+返回的 `total`（`expected_sources` 条数）覆盖了 `e2e.total`（判分样本数 31 → 17），
+而 `total` 是 `_E2E_METRIC_ORDER` 首位指标、合入门槛也读 summary。
+
+**规则**：并入前显式核对键名冲突；重名的指标在并入点改名（保留函数自身返回形状，别去改它）。
+回归建议：断言 `summary["e2e"]["total"]` 等于判分样本数，同时新指标确实落进了 `e2e`。
 
 ### 检索
 
-- `retrieval`：MRR、hit@k，基于 `decision_trace.sources/retrieved_chunks` 与 `expected_sources`。
+- `retrieval`：MRR、hit@k，基于 `decision_trace.sources` 与 `expected_sources`。
+  `report` 内的同名指标与之一致（同一函数 `compute_retrieval_metrics`）。
+- **排查「检索为空」**：看 `decision_trace.retrieval`（新增键），它含**被阈值滤掉的候选**与 `best_score`。
+  `retrieval.candidates` 非空而 `kept == 0` ⇒ 检索成功但无一越阈值（候选分数分布问题）；
+  `candidates == []` 且 `rag_degraded == true` ⇒ 检索链路真的失败。两者不可混为一谈。
 
 ## 7. 什么时候跑评估
 
