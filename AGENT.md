@@ -33,7 +33,7 @@
 | 过程式输出 spec（阶段 + 工具调用实时可见） | 已定稿 |
 | 过程式输出计划 | 已执行（Task 1–8 离线全绿；L4 本地冒烟 SKIP，首屏实测待重发联调窗口） |
 | 裸 JSON 剥离 + 过程式输出 review | 已审查（**1 P1 / 1 P2 / 2 P3**）：哨兵特性成立且按要求流出；但**剥离未命中报告 bug 的根因**——症状主因是既有「提案 JSON 随 `answer` delta 流出 + 前端纯累加」，剥离作用于 `state["answer"]` 够不到流；连带 spec §5-6 红线验收为**假绿**（全流确含被拒工具名），故 devlog §3.2 #6 须由 ✅ 改 ❌ |
-| 裸 JSON 剥离 + 过程式输出 review | 已审查（**1 P1 / 1 P2 / 2 P3**）：哨兵特性成立且按要求流出；但**剥离未命中报告 bug 的根因**——症状主因是既有「提案 JSON 随 `answer` delta 流出 + 前端纯累加」，剥离作用于 `state["answer"]` 够不到流；连带 spec §5-6 红线验收为**假绿**（全流确含被拒工具名），故 devlog §3.2 #6 须由 ✅ 改 ❌ |
+| 联调修复计划（fetch 取不到源码 + 回答重复两遍） | 已执行（Task 1–8 离线全绿：coze 424 / 前端 440；3 处计划偏差 + 1 处计划外改进；**Task 0 现场证据仍待联调侧**；L4 本地冒烟 SKIP，线上未验证） |
 
 ## 规约与文档索引
 
@@ -101,6 +101,9 @@
 | 回答裸 JSON 剥离实现 | `docs/devlog/2026-09-13-strip-answer-leading-tool-json.md` | `_strip_leading_tool_json`（`raw_decode` 平衡解析）+ 规则 0/1b + `SYSTEM_PROMPT_MAIN_AGENT` 两句约束（coze 407，1 处计划偏差：规则 0 须在规则 1 后再调一次，否则计划自身的用例 #6 必失败）。**review 更正**：本件是**终态产物侧的正确加固**，但**未命中**用户所报症状的根因（见 §7） |
 | 过程式输出实现 | `docs/devlog/2026-09-13-process-streaming.md` | 「流中哨兵」`<!--jt:process {json}-->` 借 `stream_mode="messages"` 出流（零外壳/零 Java/零协议变更）；三发射点 + `RemoveMessage`/历史过滤两道卫生防线 + 前端实时进度区（coze 407 / 前端 431，L5 外壳 0 命中；4 处计划偏差含 `renderMarkdown` 实为**丢弃**哨兵、同批 id 重复静默丢事件；L4 SKIP 且首屏 18s 对照为推演非实测）。**review 处置见 §5**：P1 前端 `stripLeadingToolJson` 已实施并端到端取证、红线 #6 改 ❌、P2 未修但已用测试钉住、2 P3 已改 |
 | 裸 JSON 剥离 + 过程式输出 review | `docs/reviews/2026-09-13-process-streaming-and-strip-leading-tool-json-review.md` | 执行审查（**1 P1 / 1 P2 / 2 P3**，已全部处置）：独立复跑 coze 407 / 前端 431 与 devlog 吻合，4 处计划偏差**全判为改进**（规则 1b 补的是计划自身代码片段的漏洞）；P1 报告 bug 根因未命中 + 红线 #6 假绿（**既有**违规）→ 前端 `stripLeadingToolJson` 修复；P2 终答下发两次（同根因，用户选定最小修复故未修，已钉住）；P3 节点名 `run_tools` 与 SDK `tools` 过滤器隐式耦合、哨兵不跨 chunk 属假定 → 均已改 |
+
+| 联调修复计划 | `docs/plan/2026-09-14-fix-fetch-context-and-duplicate-answer-plan.md` | 2026-09-14 联调两 bug：**A 回答正文重复两遍**（已用真实图 + SDK 全链路复现，根因 = `propose` 终答轮把终答写进 `agent_messages` 致其随 `answer` delta 流出，与 `build_final` 构成重复）；**B fetch 调了却「没有源码」**（五条各自独立确认的缺陷：前端 `multiState.entryFile` 从未被赋值、`_resolve_code` 静默回落 `source_code` 且 `file` 恒空、`files` 非空+`entry_file` 空时「成功但空」无信号、P4 阈值只覆盖 `len(files) > 1`、`switchMode('single')` 不清 `multiState.files`）；跨 coze + 前端 |
+| 联调修复实现 | `docs/devlog/2026-09-14-fix-fetch-context-and-duplicate-answer.md` | 上述两 bug 的实施记录：`propose` 终答/收束轮不入 `agent_messages`（根治重复正文）、`_resolve_code` 六级有序解析 + 自描述回包（`file`/`file_source`/`code_chars`）+ 取消「成功但空」、P4 判据改按 `match_file_key` 匹配不到、前端 `entryFile` 接线（`refreshEntryFile`）+ 按模式裁剪提问体（coze 424 / 前端 440，3 处计划偏差 + 1 处计划外改进；Task 0 现场证据待联调侧，L4 SKIP 线上未验证）。**§6 追加**：联调反馈「执行过程区不再显示 Main.java」——排查为「痕迹只反映模型想读什么（`args`）而非实际读到什么（`result`）」的结构性缺口，前端补 fetch 专用渲染（`→ Main.java（主入口），1234 字` / `→ 失败：…`），前端 444 passed |
 
 ## 文档规范
 

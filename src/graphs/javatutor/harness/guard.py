@@ -63,17 +63,19 @@ def decide(action: Action | ParseError, state: dict) -> GuardDecision:
             options=[],
         )
 
-    # P4 文件名歧义：只在多文件且按既有口径都匹配不到时才需要人来选
+    # P4 文件名歧义：按既有口径（match_file_key，与工具同源）匹配不到时才需要人来选。
+    # 判据是「找不到」，与项目有几个文件无关——旧判据 `len(files) > 1` 会把单文件项目
+    # 漏到工具层去吃硬错误 `文件不存在：…`（2026-09-14 联调修复 Task 3）。
     files = state.get("files") or {}
     if action.tool == "fetch_execution_context":
         wanted = action.args.get("file")
-        if wanted and len(files) > 1 and match_file_key(files, wanted) is None:
+        if wanted and len(files) >= 1 and match_file_key(files, wanted) is None:
             options = sorted(files.keys())[:8]
             return GuardDecision(
                 verdict="needs_decision",
                 policy="P4",
                 reason=(
-                    f"项目里有多个文件，但找不到 {wanted}。可选文件：{'、'.join(options)}。"
+                    f"项目文件里找不到 {wanted}。可选文件：{'、'.join(options)}。"
                     "请用其中某个文件名重新提出读取请求。"
                 ),
                 options=options,

@@ -101,17 +101,24 @@ def propose(state, model=None) -> dict[str, Any]:
 
     if not isinstance(resp, str):
         resp = str(resp)
-    out_messages = history + [AIMessage(content=resp)]
 
-    # 收束轮：无论模型输出什么，都产出 answer，绝不产出 Action
+    # 终答轮 / 收束轮**不**把模型原文写进 ``agent_messages``（2026-09-14 联调 Bug A）。
+    # 该轮之后图一定不再回到 propose（``_route_after_propose`` 把无 action 的轮次导向
+    # critic），这条 ``AIMessage`` 对后续推理无用；但 ``stream_mode="messages"`` 会把
+    # ``agent_messages`` 一并转出，平台 SDK 将其转成 ``answer`` delta，与 ``build_final``
+    # 下发的终答在前端纯累加后表现为「正文重复两遍」。
+    # ``agent_messages`` 无 reducer（返回即替换），故返回 ``history`` 即等价于「不追加」。
     if converging:
         parsed = parse_action(resp)
         answer = _convergence_answer(state) if parsed is not None else resp
-        return {"answer": answer, "agent_messages": out_messages, "proposed_action": {}}
+        return {"answer": answer, "agent_messages": history, "proposed_action": {}}
 
     action = parse_action(resp)
     if action is None:
-        return {"answer": resp, "agent_messages": out_messages, "proposed_action": {}}
+        return {"answer": resp, "agent_messages": history, "proposed_action": {}}
+
+    # 提案轮（含 ParseError）仍须追加：模型要看到自己上一轮的提案原文，才有因果链。
+    out_messages = history + [AIMessage(content=resp)]
     if isinstance(action, ParseError):
         return {
             "proposed_action": {"tool": action.tool, "parse_error": action.reason, "raw": action.raw},

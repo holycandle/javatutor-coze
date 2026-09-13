@@ -188,6 +188,51 @@ Accept: application/json
 当前暂时无法获取这次代码运行的执行上下文，请重新运行代码后再提问。
 ```
 
+### 5.6 纯 state 读取的入口解析顺序（2026-09-14 联调修复 D2/D3）
+
+Phase 2 起 `fetch_execution_context` 是**纯 state 读取工具**（不发 HTTP，见
+`2026-08-30-fetch-execution-context-as-tool-design.md`），"取哪个文件的代码" 由
+`_resolve_code` 决定。2026-09-14 联调报告「决策痕迹显示调用了 fetch，但多轮都说缺少
+Main.java 的源码」，定位到该函数在 `entry_file` 为空时**静默回落到 `source_code`
+并把 `file` 置为空串**——多文件下 `source_code` 是**当前活动文件**，
+模型既不知道自己拿到了什么，也无法自证拿到了 Main.java，而痕迹里那是一次**绿色**调用。
+
+**解析顺序（第一条命中即停）**：
+
+| # | 来源 | `file_source` |
+|---|---|---|
+| 1 | 显式 `file` 参数（精确 / 忽略大小写 / basename） | `explicit` |
+| 2 | `entry_file`（主入口，同样按上述三种口径匹配） | `entry_file` |
+| 3 | `current_step_file`（当前执行步所在文件） | `current_step_file` |
+| 4 | `files` **唯一项** | `only_file` |
+| 5 | `source_code`（单文件 / 激活文件） | `source_code` |
+| 6 | 以上皆不成立 | 结构化失败 |
+
+- 契约**向后兼容**：仍以「显式 `file` → 主入口」为先；第 3、4 条是**新增兜底**，
+  把过去「解析不到就静默返回 source_code」换成**有序兜底 + 明示来源**。
+- 特例保留：`files` 为空（单文件 payload）而模型传了 `file` 时，仍回退 `source_code`
+  并标 `file_source="source_code"`，不报「文件不存在」（既有用例钉住）。
+
+**成功回包必须自描述**：新增 `file`（这次真正取到的文件）与 `file_source`（上表来源）、
+`code_chars`（取到的字符数）。渲染进观测的摘要（`harness/render.py::_handle_fetch`）
+同样带这两个字段，并记进 `tool_calls[].result`。
+
+**取消「成功但空」**：任何解析不到源码的路径（含 `start_line`/`end_line` 切出空串）
+一律返回 `fetch_context_failed=true`，`error` 里点名候选文件：
+
+```python
+{
+    "error": "未能取到源码（解析来源：<source>；候选文件：['A.java', 'B.java']）。请用 file 参数指定要读的文件名。",
+    "fetch_context_failed": True,
+    "fetch_context_latency_ms": 0.0,
+}
+```
+
+不变式（验收判据）：**`fetch_context_failed == False` ⇒ `code_chars > 0`。**
+
+> ⚠ 该改动**收紧**了既有行为：过去「有 steps 无 code」算成功，现在算失败。
+> 全量回归已确认无既有用例依赖该「静默成功」。
+
 ## 6. Graph 变更
 
 当前链路：

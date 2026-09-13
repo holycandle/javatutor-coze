@@ -52,7 +52,8 @@ def _format_step_facts(args: dict, result: dict) -> str:
 
 def _handle_fetch(tool_calls, fetched_state_updates, state, args) -> str:
     """dispatch fetch_execution_context：暂存执行上下文，返回追加到 context 的文本。"""
-    tool_calls.append({"tool": "fetch_execution_context", "args": args})
+    call = {"tool": "fetch_execution_context", "args": args}
+    tool_calls.append(call)
     try:
         result = fetch_execution_context(state, **args)
     except TypeError as exc:
@@ -68,6 +69,14 @@ def _handle_fetch(tool_calls, fetched_state_updates, state, args) -> str:
                 ),
                 "fetch_context_error": str(result["error"]),
             }
+        )
+        # 失败原因进 tool_calls：决策痕迹里「调了 fetch 却拿不到源码」必须能自证，
+        # 否则只能看到一次绿色调用（2026-09-14 联调报告的诊断盲区）。
+        # **JSON 而非裸文本**，与成功分支、与 ``step_facts`` 的 ``result`` 同形（消费方统一
+        # ``json.loads``）；错误串先截 120 字再 dump，**保证 dump 出来一定是合法 JSON**——
+        # 若反过来先 dump 再截，会在字符串中间断开，前端 ``JSON.parse`` 必失败（2026-09-14 实测）。
+        call["result"] = json.dumps(
+            {"stored": False, "error": str(result["error"])[:120]}, ensure_ascii=False
         )
         return f"\n\n[fetch_execution_context 失败]\n{result['error']}"
     fetched_ctx = result.get("fetched_context") or {}
@@ -97,8 +106,22 @@ def _handle_fetch(tool_calls, fetched_state_updates, state, args) -> str:
     fetched_state_updates.update(updates)
     digest = {
         k: result.get(k)
-        for k in ("file", "steps_count", "current_step_index", "current_line", "algorithm_tags")
+        for k in (
+            "file",
+            "file_source",
+            "code_chars",
+            "steps_count",
+            "current_step_index",
+            "current_line",
+            "algorithm_tags",
+        )
         if k in result
     }
     payload = {"stored": True, **digest, "code": result.get("code", "")}
+    # 成功也可诊断：把「拿到了哪个文件、多长、走的是哪条兜底」记进 tool_calls，
+    # 与 step_facts 的 result 记录同形（决策痕迹里 fetch 不再是一次无信息的绿调用）。
+    # **摘要里不放 `code`**：整份源码动辄数千字符，而下述截断会把 JSON 断在字符串中间，
+    # 前端 `JSON.parse` 必失败、行上什么都读不出来（2026-09-14 实测
+    # `Unterminated string starting at column 180`）。源码只进 observation 文本给模型看。
+    call["result"] = json.dumps({"stored": True, **digest}, ensure_ascii=False)[:300]
     return f"\n\n[fetch_execution_context 结果]\n{json.dumps(payload, ensure_ascii=False)}"

@@ -128,7 +128,45 @@ def test_propose_seeds_system_prompt_and_context_on_first_call():
     assert f"[当前轮次] 1/{MAX_ROUNDS}" in sent[1].content
     assert out["answer"] == "直接回答"
     assert out["proposed_action"] == {}
-    assert out["agent_messages"][-1].content == "直接回答"
+
+
+def test_terminal_answer_does_not_enter_agent_messages():
+    """终答轮不把模型原文写进 ``agent_messages``（2026-09-14 联调 Bug A 的修复点）。
+
+    该轮之后图一定不再回到 propose（``_route_after_propose`` 把无 action 的轮次导向
+    critic），这条 ``AIMessage`` 对后续推理无用；而 ``stream_mode="messages"`` 会把它
+    转成 ``answer`` delta，与 ``build_final`` 的终答构成**重复正文**。
+    """
+    state = dict(
+        STATE,
+        agent_messages=[SystemMessage(content="sys"), HumanMessage(content="ctx")],
+    )
+    out = propose(state, model=RecordingModel(["直接回答"]))
+    assert out["answer"] == "直接回答"
+    assert len(out["agent_messages"]) == 2, "终答轮不得追加 AIMessage"
+    assert [type(m).__name__ for m in out["agent_messages"]] == ["SystemMessage", "HumanMessage"]
+
+
+def test_convergence_round_does_not_enter_agent_messages():
+    state = dict(
+        STATE,
+        tool_rounds=MAX_ROUNDS,
+        agent_messages=[SystemMessage(content="sys"), HumanMessage(content="ctx")],
+    )
+    out = propose(state, model=RecordingModel(["随便说点什么"]))
+    assert out["answer"]
+    assert len(out["agent_messages"]) == 2
+
+
+def test_proposal_round_still_enters_agent_messages():
+    """提案轮**必须**追加：模型要看到自己上一轮的提案原文，才有因果链（真 ReAct）。"""
+    state = dict(
+        STATE,
+        agent_messages=[SystemMessage(content="sys"), HumanMessage(content="ctx")],
+    )
+    out = propose(state, model=RecordingModel(['{"tool": "step_facts", "args": {"step_index": 1}}']))
+    assert len(out["agent_messages"]) == 3
+    assert out["agent_messages"][-1].content == '{"tool": "step_facts", "args": {"step_index": 1}}'
 
 
 def test_propose_sees_its_own_previous_proposal():
@@ -290,12 +328,15 @@ def test_run_tools_merges_observations_into_one_message():
 
 
 def test_graph_agent_messages_alternate_roles():
-    """真 ReAct 轨迹：System → Human → AI → Human → AI…，无连续同角色消息。"""
+    """真 ReAct 轨迹：System → Human → AI → Human…，无连续同角色消息。
+
+    终答轮不再追加（2026-09-14 Bug A）：末条是 run_tools 的观察，而非终答。
+    """
     out, _ = _run(
         ['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步，x 变成了 2"]
     )
     kinds = [type(m).__name__ for m in out["agent_messages"]]
-    assert kinds == ["SystemMessage", "HumanMessage", "AIMessage", "HumanMessage", "AIMessage"]
+    assert kinds == ["SystemMessage", "HumanMessage", "AIMessage", "HumanMessage"]
 
 
 def test_run_tools_unknown_dispatch_is_error_not_silent_noop():
@@ -729,9 +770,11 @@ def test_proposal_json_delta_reaches_client_and_predates_sentinels():
        （review 2026-09-13 §1.3）：前端 ``player.js`` 是**纯累加**（``text += t``，不插分隔符、
        无重置），全仓没有任何「顶掉」逻辑。故提案 JSON 会**留在**用户看到的正文里，
        并与紧随的正文**粘连**成 ``}}###`` ——这正是用户报告的那个 bug（**既有**，非本两件引入）。
-       前端修复见 ``stripLeadingToolJson``；根因（提案不该随流下发）另议。
+       前端修复见 ``stripLeadingToolJson``。
 
-    这条测试锁住现状：若将来有人收窄了流，它应当失败并促使重新评估。
+    2026-09-14 更新：**终答**不再由 ``propose`` 下发（Bug A 修复），本测试因此只保留
+    「提案 JSON 这条既有通道仍然在」的现状记录；「正文只出现一次」由
+    ``test_client_stream_gets_the_answer_exactly_once`` 单独作红线取证。
     """
     msgs = _client_stream(
         [
@@ -752,15 +795,57 @@ def test_proposal_json_delta_reaches_client_and_predates_sentinels():
         '{"tool": "step_facts", "args": {"step_index": 1}}### 当前这一步的执行内容'
     )
 
-    # ③ 终答在正文里出现**两次**（草稿 + 终稿），纯累加使二者直接粘连——review §2（P2）
-    body = clean.split("\n\n【决策痕迹】\n")[0]
-    assert body.count("### 当前这一步的执行内容") == 2
-
-    # ④ 门闩红线的**终态**仍然成立：被拒工具名不进 ``answer``（``_redact_denied_tools`` 管住）
+    # ③ 门闩红线的**终态**仍然成立：被拒工具名不进 ``answer``（``_redact_denied_tools`` 管住）
     out, _ = _run(['{"tool": "no_such_tool", "args": {}}'] * 5)
 
     assert [r["policy"] for r in out["step_records"]] == ["P1"] * MAX_ROUNDS
     assert "no_such_tool" not in out["answer"]
+
+
+def test_client_stream_gets_the_answer_exactly_once():
+    """**红线（端到端）**：正文与 ``【决策痕迹】`` 在客户端流里各只出现**一次**。
+
+    全程走平台 SDK 的转客户端消息路径（``agent_iter_server_messages``），把 deltas 按前端
+    的方式**纯累加**、再剥哨兵——即用户实际收到的那串字节。
+
+    2026-09-14 联调 Bug A：``propose`` 的终答轮与 ``build_final`` 各下发一次，
+    纯累加后用户看到「草稿 + 终稿」两段重复正文。
+    """
+    from graphs.javatutor.process_events import parse_process_events
+
+    answer = "### 当前这一步的执行内容\n\nx 从 1 变成了 2。"
+    msgs = _client_stream(['{"tool": "step_facts", "args": {"step_index": 1}}', answer])
+    clean = parse_process_events("".join(_answer_deltas(msgs)))["clean"]
+
+    assert clean.count("### 当前这一步的执行内容") == 1
+    assert clean.count("【决策痕迹】") == 1
+    # 正文只此一处，且不在痕迹段里重复（痕迹的 reasoning 里本就可能含终答文本）
+    body = clean.split("\n\n【决策痕迹】\n")[0]
+    assert body.count("x 从 1 变成了 2") == 1
+
+
+def test_fetch_tool_call_records_its_result_in_the_trace():
+    """决策痕迹里 fetch 不再是一次无信息的绿调用（2026-09-14 Bug B 可诊断性）。
+
+    与 ``step_facts`` 的 ``result`` 同形：**两条路径都必须是合法 JSON**（消费方统一
+    ``json.loads``——前端【执行过程】区据此把文件名与失败原因渲染到行上）。失败记错误、
+    成功记自描述摘要，且**摘要里不放整份源码**（放了会被 300 字截断成不可解析的串）。
+    """
+    out, _ = _run(['{"tool": "step_facts", "args": {"step_index": 1}}', "根据第 2 步回答"])
+    fetch = [tc for tc in out["tool_calls"] if tc["tool"] == "fetch_execution_context"][0]
+    ok = json.loads(fetch["result"])  # 不合法就抛异常——这是本用例的重点
+    assert ok["stored"] is True
+    assert ok["file_source"] == "source_code"
+    assert ok["code_chars"] > 0
+    assert "code" not in ok
+
+    failed, _ = _run(
+        ['{"tool": "fetch_execution_context", "args": {}}'] * 4, source_code="", steps=[]
+    )
+    fetch = [tc for tc in failed["tool_calls"] if tc["tool"] == "fetch_execution_context"][0]
+    bad = json.loads(fetch["result"])
+    assert bad["stored"] is False
+    assert "未能取到源码" in bad["error"]
 
 
 # ── 过程哨兵（Plan A Task 4）：build_final 清理 ───────────────────────────────────

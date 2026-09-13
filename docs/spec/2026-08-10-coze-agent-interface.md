@@ -159,8 +159,22 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
 | `critic_skipped` | boolean | 评审调用失败时为 `true` |
 | `revise_skipped` | boolean | 修订调用失败时为 `true` |
 | `compaction_mode` | string | `none`（≤200 步）、`windowed`（压缩成功）、`truncated`（压缩失败后截断） |
-| `tool_calls` | array | 主 Agent 工具循环实际执行的工具调用记录，元素含 `tool` 与 `args`；用于评测工具调用准确率 |
+| `tool_calls` | array | 主 Agent 工具循环实际执行的工具调用记录，元素含 `tool` 与 `args`；用于评测工具调用准确率。**2026-09-14 起 `fetch_execution_context` 的记录也带 `result`**（`step_facts` 一直有）：**两条路径都是合法 JSON**（消费方统一 `json.loads`）——成功是自描述摘要（`{"stored": true, "file", "file_source", "code_chars", ...}`，**不含 `code`**），失败是 `{"stored": false, "error": ...}`；决策痕迹里「调了 fetch 却拿不到源码」必须能自证 |
 | `token_usage` | object | 本次回答的 token 消耗：`prompt_tokens`、`completion_tokens`、`estimated`（true 表示估算值）；用于评测成本 |
+
+> **2026-09-14（联调修复 Task 1/D2）**：`fetch_execution_context` 的观测
+> （`[fetch_execution_context 结果]`，同时进 `step_records[].summary`）新增两个字段：
+> `file` 是**这次真正取到的文件**（空串 = 单文件代码/激活文件），
+> `file_source` 是解析来源（`explicit` / `entry_file` / `current_step_file` /
+> `only_file` / `source_code`），`code_chars` 是取到的字符数。
+> 同时**取消「成功但空」**：解析不到源码（含切行后为空）一律返回
+> `fetch_context_failed=true` + 带候选文件名的 `error`，不再出现
+> `fetch_context_failed=false` 配 `code=""` 的静默成功。
+> 前端【执行过程】区把这两个字段渲染进 fetch 行
+> （`调用 fetch_execution_context → Main.java（主入口），1234 字`；失败为 `→ 失败：<错误>`，
+> 长错误截 60 字）。**不能只看 `args`**：自动前置的 fetch（`args` 为空）与模型不传 `file`
+> 的调用都没有文件名。
+> 详见 `2026-08-23-execution-context-fetch-design.md`。
 
 ## 4. 正文引用格式
 

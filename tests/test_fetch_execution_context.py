@@ -89,10 +89,20 @@ def test_file_param_not_found_returns_error():
 
 
 def test_default_reads_main_entry():
-    state = {"source_code": "class Main {}", "files": {"A.java": "..."}, "steps": []}
+    """无 entry_file / 无当前步文件 / 项目有**多个**文件 → 兜底到 source_code。
+
+    （单文件项目走 ``only_file``，见 ``test_fetch_uses_only_file_when_single``——
+    2026-09-14 D3 新增的兜底顺序把「唯一文件」排在 ``source_code`` 之前。）
+    """
+    state = {
+        "source_code": "class Main {}",
+        "files": {"A.java": "...", "B.java": "..."},
+        "steps": [],
+    }
     r = fetch_execution_context(state)
     assert r["code"] == "class Main {}"
     assert r["file"] == ""
+    assert r["file_source"] == "source_code"
 
 
 def test_default_prefers_entry_file():
@@ -138,6 +148,7 @@ def test_single_file_file_param_falls_back_to_source_code():
     assert r["code"] == state["source_code"]
     assert not r.get("error")  # 成功回退，未报文件不存在
     assert r["file"] == "Main.java"
+    assert r["file_source"] == "source_code"
     assert r["fetch_context_failed"] is False
 
 
@@ -146,3 +157,143 @@ def test_no_http_env_dependency_in_tool_module():
 
     assert not hasattr(mod, "httpx")
     assert not hasattr(mod, "os")  # 维持 Phase 1「无环境依赖」约定（basename 用 rsplit 实现）
+
+
+# ── 2026-09-14 联调修复 Task 1：自描述 + 禁止「成功但空」 ────────────────────────
+
+
+def test_fetch_multi_file_without_entry_does_not_silently_return_empty():
+    """多文件 + entry_file 空 + source_code 空：**必须**结构化失败，不得「成功但空」。
+
+    这是报告症状（「决策痕迹显示调用了 fetch，但多轮都说缺少 Main.java 的源码」）里
+    最致命的一环：过去这条路径 ``error is None`` / ``fetch_context_failed is False`` /
+    ``code == ""``，痕里是绿色调用、模型却什么也没拿到。
+    """
+    state = {
+        "files": {"Main.java": "class Main {}", "Util.java": "class Util {}"},
+        "entry_file": "",
+        "source_code": "",
+        "steps": [],
+    }
+    r = fetch_execution_context(state)
+    assert r["fetch_context_failed"] is True
+    assert r["error"]
+    # 错误必须点名候选文件，模型才有可执行的下一步
+    assert "Main.java" in r["error"] and "Util.java" in r["error"]
+
+
+def test_fetch_empty_only_file_is_structured_failure():
+    """唯一文件解析到了、但内容为空：同样算失败（``code_chars == 0`` 不得配 ``False``）。"""
+    state = {"files": {"Main.java": ""}, "entry_file": "", "source_code": "", "steps": []}
+    r = fetch_execution_context(state)
+    assert r["fetch_context_failed"] is True
+    assert "Main.java" in r["error"]
+
+
+def test_fetch_out_of_range_slice_is_structured_failure():
+    """行范围切出空串也算「成功但空」：一并结构化失败，而不是回一份空 code。"""
+    state = {"source_code": "line1\nline2", "steps": []}
+    r = fetch_execution_context(state, start_line=99, end_line=120)
+    assert r["fetch_context_failed"] is True
+    assert r["error"]
+
+
+def test_fetch_reports_file_and_source():
+    """单文件 payload：file 为空串（无项目文件），来源如实标注为 source_code。"""
+    state = {"source_code": "class Main {}", "files": {}, "steps": []}
+    r = fetch_execution_context(state)
+    assert r["file"] == ""
+    assert r["file_source"] == "source_code"
+    assert r["code_chars"] == len(r["code"]) > 0
+
+
+def test_fetch_reports_entry_file_source():
+    state = {
+        "source_code": "class Active {}",
+        "entry_file": "Main.java",
+        "files": {"Main.java": "class Main {}", "Util.java": "class Util {}"},
+        "steps": [],
+    }
+    r = fetch_execution_context(state)
+    assert r["file"] == "Main.java"
+    assert r["file_source"] == "entry_file"
+    assert r["code_chars"] == len("class Main {}")
+
+
+def test_successful_fetch_always_has_nonempty_code_chars():
+    """验收判据（plan §3-2）：``fetch_context_failed is False`` ⇒ ``code_chars > 0``。"""
+    states = [
+        {"source_code": "class A {}", "steps": []},
+        {"source_code": "", "files": {"A.java": "class A {}"}, "steps": []},
+        {"source_code": "", "files": {"A.java": "class A {}", "B.java": "class B {}"},
+         "entry_file": "B.java", "steps": []},
+        {"source_code": "", "files": {"A.java": "class A {}", "B.java": "class B {}"},
+         "current_step_file": "B.java", "steps": []},
+    ]
+    for state in states:
+        r = fetch_execution_context(state)
+        assert r["fetch_context_failed"] is False, r
+        assert r["code_chars"] > 0, r
+
+
+# ── Task 2：入口解析顺序（D3） ────────────────────────────────────────────────
+
+
+def test_fetch_falls_back_to_current_step_file():
+    state = {
+        "files": {"Main.java": "class Main {}", "Util.java": "class Util {}"},
+        "entry_file": "",
+        "source_code": "class Active {}",
+        "steps": [{"step": 0, "file": "Util.java", "variables": {}}],
+        "current_step_index": 0,
+    }
+    r = fetch_execution_context(state)
+    assert r["code"] == "class Util {}"
+    assert r["file"] == "Util.java"
+    assert r["file_source"] == "current_step_file"
+
+
+def test_fetch_uses_only_file_when_single():
+    state = {
+        "files": {"Main.java": "class Main {}"},
+        "entry_file": "",
+        "source_code": "class Empty {}",
+        "steps": [],
+    }
+    r = fetch_execution_context(state)
+    assert r["code"] == "class Main {}"
+    assert r["file_source"] == "only_file"
+
+
+def test_fetch_explicit_file_wins():
+    state = {
+        "files": {"Main.java": "class Main {}", "Util.java": "class Util {}"},
+        "entry_file": "Main.java",
+        "source_code": "",
+        "steps": [],
+    }
+    r = fetch_execution_context(state, file="Util.java")
+    assert r["code"] == "class Util {}"
+    assert r["file"] == "Util.java"
+    assert r["file_source"] == "explicit"
+
+
+def test_entry_file_beats_current_step_file():
+    """keep 既有契约：默认读主入口，当前步所在文件只是 entry_file 缺失时的兜底。"""
+    state = {
+        "files": {"Main.java": "class Main {}", "Util.java": "class Util {}"},
+        "entry_file": "Main.java",
+        "source_code": "",
+        "steps": [{"step": 0, "file": "Util.java", "variables": {}}],
+        "current_step_index": 0,
+    }
+    r = fetch_execution_context(state)
+    assert r["file"] == "Main.java"
+    assert r["file_source"] == "entry_file"
+
+
+def test_entry_file_matches_by_basename():
+    state = {"files": {"src/Main.java": "class Main {}"}, "entry_file": "Main.java", "steps": []}
+    r = fetch_execution_context(state)
+    assert r["file"] == "src/Main.java"
+    assert r["file_source"] == "entry_file"

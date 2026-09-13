@@ -59,10 +59,18 @@ class TestP4FileAmbiguity:
         assert "Helper.java" in d.reason
         assert d.options == ["Helper.java", "Main.java"]
 
-    def test_single_file_never_ambiguous(self):
-        """单文件下错文件名不算歧义：工具会回退到 source_code（既有语义）。"""
+    def test_single_file_miss_also_needs_decision(self):
+        """单文件下错文件名**同样**是歧义（2026-09-14 D3/Task 3 收紧）。
+
+        旧判据 ``len(files) > 1`` 会把单文件项目漏到工具层去吃硬错误
+        （``文件不存在：Mian.java``）——而工具层同样解析不到，给不出可重试的选项。
+        P4 要拦的是「请求的文件按既有口径找不到」，与项目有几个文件无关。
+        """
         d = decide(act("fetch_execution_context", {"file": "Mian.java"}), {"files": ONE_FILE})
-        assert d.verdict == "allow"
+        assert d.verdict == "needs_decision"
+        assert d.policy == "P4"
+        assert d.options == ["Main.java"]
+        assert "Main.java" in d.reason
 
     def test_case_insensitive_hit_is_allowed(self):
         d = decide(act("fetch_execution_context", {"file": "main.java"}), {"files": ONE_FILE})

@@ -27,6 +27,18 @@ def test_main_agent_prompt_keeps_tool_call_examples():
     assert '"tool": "step_facts", "args": {"step_index": 1, "line": 4}' in SYSTEM_PROMPT_MAIN_AGENT
 
 
+def test_main_agent_prompt_teaches_fetch_observation_fields():
+    """主 Agent 必须知道怎么读 fetch 的观测、拿不到时怎么办（2026-09-14 Task 4）。
+
+    报告症状是「调了 fetch 却每轮都说缺少 Main.java 的源码」——观测里带 `file` /
+    `file_source` / `code_chars`，只有提示词告诉模型这三个字段的含义，自描述才起作用。
+    """
+    assert "file_source" in SYSTEM_PROMPT_MAIN_AGENT
+    assert "code_chars" in SYSTEM_PROMPT_MAIN_AGENT
+    # 拿不到时的行为：按错误里的候选文件重取，或如实转述，不得含糊
+    assert "[fetch_execution_context 失败]" in SYSTEM_PROMPT_MAIN_AGENT
+
+
 def test_prompt_version_defined():
     assert versions.PROMPT_VERSION.startswith("2026-08-13")
 

@@ -62,6 +62,16 @@
 > 3. 因此 §3.3 的红线纪律要**扩大适用范围**：不只哨兵不得含被拒工具名，
 >    **既有通道（`agent_messages` 的提案 delta）本身就是一条泄露路径**，
 >    其根治不在本设计边界内（见 §6 遗留）。
+>
+> **2026-09-14 状态更新（联调修复 D1/Task 5 已落地）**：重复正文的**根因已修在源头**——
+> `propose` 只在**产出提案**（Action / ParseError）时才把 `AIMessage` 追加进
+> `agent_messages`；**终答轮与收束轮不再追加**（该轮之后图一定不再回到 propose，
+> 这条消息对后续推理无用，却会作为 `answer` delta 与 `build_final` 的终答构成重复）。
+> 于是**流上只剩 `build_final` 一份正文**——上文 review §2 记录的 P2「终答下发两次」
+> 已消除。**提案 JSON 仍然随流下发**（它是 ReAct 轨迹的承载体，前端
+> `stripLeadingToolJson` 在渲染前剥净），这是**有意保留**的现状，见修复计划 §1「明确不做」。
+> 连带口径变化：`decision_trace.reasoning` 少一条（终答不再算「工具调用之间的思考」），
+> 见 `docs/spec/2026-08-10-coze-agent-interface.md`。
 
 `state.py:180-184` 对此有明确规定：
 

@@ -191,6 +191,13 @@ def build_reasoning(messages, max_chars: int = 1200) -> tuple[list[dict], bool]:
   （复用 `harness/contracts.py::parse_action`；解析不出则为空列表）。
 - **截断必须显式**：`max_chars` 默认 1200，超长在 trace 顶层加 `reasoning_truncated: true`。
 
+> **2026-09-14 口径变化（联调修复 D1/Task 5）**：`propose` 的**终答轮与收束轮不再把
+> 模型原文追加进 `agent_messages`**（见 `2026-09-13-process-streaming-design.md` §2.1 的
+> 状态更新）。本函数是「按序 filter `AIMessage`」，故 `reasoning` **少一条**——
+> 即末尾那次「直接给出终答」的输出不再作为一条思考片段。
+> **这是更正确的语义**：终答不是「工具调用之间的思考」，且它此前以 `answer` delta
+> 重复流给客户端。既有断言若依赖「末条 = 终答」，须同步改写。
+
 ### 3.4 指标接线（P1，防复发的结构性修复）
 
 - `tools/eval_cli.py report` 在算 `extended` 时**并入** `compute_retrieval_metrics`，

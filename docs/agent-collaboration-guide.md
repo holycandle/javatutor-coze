@@ -36,7 +36,7 @@ flowchart TD
 | 步 | 节点 | 说明 |
 | --- | --- | --- |
 | 提案 | `main_agent` | 一次 LLM 调用。要么给出终答（`answer`），要么给出工具提案 `{"tool":..., "args":...}`；**它不做任何治理判断** |
-| 门闩 | `guard` | 纯函数 `decide()` 裁决：白名单（P1）、参数结构（P2）、轮次预算（P3）、文件名歧义（P4）、重复步骤（P5）。allow 才放行；P4 是唯一的暂停点——HITL 开则中断等用户选文件名（`P4-resolved`，补全原提案后放行），关则降级为 deny |
+| 门闩 | `guard` | 纯函数 `decide()` 裁决：白名单（P1）、参数结构（P2）、轮次预算（P3）、文件名歧义（P4）、重复步骤（P5）。allow 才放行；P4 是唯一的暂停点——HITL 开则中断等用户选文件名（`P4-resolved`，补全原提案后放行），关则降级为 deny。P4 的判据是「按 `match_file_key`（与 fetch 工具同源）**匹配不到**」，与项目有几个文件无关——单文件项目里写错文件名同样需要人来选，不会漏到工具层去吃硬错误 |
 | 执行 | `run_tools` | 只执行已放行的提案；查单步证据前自动前置一次 `fetch_execution_context`（不占轮次） |
 | 观察 | `run_tools` / `guard` | 同一份结果两种形态：渲染文本回灌给模型（`agent_messages`），结构化 `Observation` 记进 `step_records` |
 
@@ -53,6 +53,22 @@ flowchart TD
 | 整体代码（执行上下文） | **工具（按需）**：主 Agent 按需调 `fetch_execution_context` | 量大、随请求变化；读到后先暂存 state，是否展示由 agent / 上下文工程决定，不强制注入 |
 | 单步执行证据 | **工具（JIT）**：主 Agent 按需调 `step_facts` | 量大、随问题变化，按需取 |
 | 治理决策（放行 / 拒绝 / 需要用户选择） | **门闩层（纯函数裁决）**：`harness/guard.py::decide` | 必须是可测的确定性规则，不能靠提示词祈愿；裁决结果与理由走 `guard_decision` / `step_records` |
+
+> **`fetch_execution_context` 的回包自描述（2026-09-14）**：入口解析按
+> `file` → `entry_file` → `current_step_file` → 唯一文件 → `source_code` 依次兜底，
+> 成功回包必带 `file`（**这次真正取到的文件**，空串 = 单文件/激活文件）与
+> `file_source`（`explicit` / `entry_file` / `current_step_file` / `only_file` / `source_code`）
+> 与 `code_chars`（字符数），三者同时进 `[fetch_execution_context 结果]` 与
+> `tool_calls[].result`。**解析不到源码一律结构化失败**
+> （`fetch_context_failed=true` + 列出候选文件名的 `error`），不再有
+> `fetch_context_failed=false` 配 `code=""` 的「成功但空」——这正是「痕迹里是绿调用、
+> 模型却多轮说没有源码」的成因。详见
+> `docs/spec/2026-08-23-execution-context-fetch-design.md` §5.6。
+>
+> 前端【执行过程】区据此把 fetch 行渲染成
+> `调用 fetch_execution_context → Main.java（主入口），1234 字`（失败为 `→ 失败：<错误>`）。
+> **只看模型传的 `args` 是不够的**：自动前置的那次 fetch（`args` 为空）与模型不传 `file`
+> 的调用都没有文件名，此前只能显示一行 `调用 fetch_execution_context`。
 
 明确**不做**的事（避免将来重复论证）：
 
@@ -149,7 +165,7 @@ id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，
   ——本次运行的模式**事实**，由前端随每次提问送来（后端透传）；**两者同时出现或同时缺失**，缺失表示**模式未知**
   （不得当成默认模式）。语义（两种模式各要求什么）在 coze 侧知识与引导里，见 `docs/spec/2026-08-10-coze-agent-interface.md` §1.1。
 - 输出（`intent=analyze`）：结构化 JSON（复杂度、算法、数据结构标签），不经后续问答链路。
-- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`），`verification` 为 `verify` 节点的确定性 grounding 核对结果（`applicable` / `checked` / `violations` / `hallucinated` / `grounding_ok`；无执行步骤时为 `{}` 或 `applicable=false`，明确不判罚）。回答还可附带可选的 `【视角导航】` 块（前端渲染为可点击卡片，跳转面板，协议见 `docs/spec/2026-09-07-coze-agent-view-navigation.md`）与可选的 `【编辑建议】` 块（前端渲染为 diff 卡 / 优化方案卡 / 整文件覆盖卡，`kind` 取 `patch`/`options`/`replace`，协议见 `docs/spec/2026-08-10-coze-agent-interface.md` §2.2 与 `docs/spec/2026-09-10-coze-agent-code-optimization.md`）。
+- 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`），**2026-09-14 起 `fetch_execution_context` 的记录也带 `result`**（**两条路径都是合法 JSON**，消费方统一 `json.loads`；成功为 `{"stored": true, "file", "file_source", "code_chars", ...}` 摘要且**不含 `code`**，失败为 `{"stored": false, "error": ...}`；`step_facts` 一直有），使「调了 fetch 却拿不到源码」能自证，`verification` 为 `verify` 节点的确定性 grounding 核对结果（`applicable` / `checked` / `violations` / `hallucinated` / `grounding_ok`；无执行步骤时为 `{}` 或 `applicable=false`，明确不判罚）。回答还可附带可选的 `【视角导航】` 块（前端渲染为可点击卡片，跳转面板，协议见 `docs/spec/2026-09-07-coze-agent-view-navigation.md`）与可选的 `【编辑建议】` 块（前端渲染为 diff 卡 / 优化方案卡 / 整文件覆盖卡，`kind` 取 `patch`/`options`/`replace`，协议见 `docs/spec/2026-08-10-coze-agent-interface.md` §2.2 与 `docs/spec/2026-09-10-coze-agent-code-optimization.md`）。
 
   决策痕迹的**过程化**三个键（2026-09-13 新增，纯增量，老消费方忽略即可）：
 
