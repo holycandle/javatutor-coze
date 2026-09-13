@@ -131,6 +131,23 @@ def _fetch_similar(vector: list[float], top_k: int, url: str | None = None) -> l
             return cur.fetchall()
 
 
+def _raw_rows(
+    query: str,
+    top_k: int,
+    embedder: Callable,
+    fetcher: Callable,
+) -> list[tuple]:
+    """取原始检索行（未过滤阈值）：embedding + pgvector 查询。
+
+    ``search_chunks`` 与 ``search_chunks_debug`` 共用此函数，保证两条路径的
+    「召回」阶段完全一致（差异只在过滤与否）。空查询返回空列表。
+    """
+    if not query.strip():
+        return []
+    vector = embedder([query])[0]
+    return fetcher(vector, top_k)
+
+
 def search_chunks(
     query: str,
     top_k: int = DEFAULT_TOP_K,
@@ -144,12 +161,51 @@ def search_chunks(
     导致 retrieve_knowledge 的 except 分支（rag_degraded=True）永远不触发，
     RAG 故障被静默掩盖。改为向上抛出，让 graph 节点能正确置降级标志并记录到决策痕迹。
     """
-    if not query.strip():
-        return []
-    vector = embedder([query])[0]
-    rows = fetcher(vector, top_k)
+    rows = _raw_rows(query, top_k, embedder, fetcher)
     return [
         {"source": row[0], "chunk_index": row[1], "content": row[2], "score": round(float(row[3]), 4)}
         for row in rows
         if float(row[3]) >= threshold
     ]
+
+
+def search_chunks_debug(
+    query: str,
+    top_k: int = DEFAULT_TOP_K,
+    threshold: float = DEFAULT_THRESHOLD,
+    embedder: Callable = embed_texts,
+    fetcher: Callable = _fetch_similar,
+) -> dict[str, Any]:
+    """检索并返回**全量候选**与阈值判定，供决策痕迹诊断。
+
+    与 ``search_chunks`` 的差别：不过滤低分候选，并把 ``best_score`` / ``kept`` 一并带回，
+    使「没召回到」与「召回到但被阈值滤掉」在痕迹里可区分。
+
+    阈值过滤原本发生在 ``search_chunks`` 内部，调用方拿不到被滤掉的行——这正是
+    部署侧「sources 恒空且 rag_degraded=false」（即检索成功但无一越阈值）无法定案的
+    技术原因。本函数是移除该盲区的诊断通道。
+
+    返回 ``{query, top_k, threshold, candidates[{source, chunk_index, score, content, kept}],
+    best_score, kept}``；无候选时 ``best_score`` 为 0.0。``best_score`` 取候选**最高分**
+    （不取首条——那会把「最近邻」这一事实偷偷绑到 fetcher 的排序不变量上）。失败语义与
+    ``search_chunks`` 一致：向上抛出，不吞成空结果。
+    """
+    rows = _raw_rows(query, top_k, embedder, fetcher)
+    candidates = [
+        {
+            "source": row[0],
+            "chunk_index": row[1],
+            "content": row[2],
+            "score": round(float(row[3]), 4),
+            "kept": float(row[3]) >= threshold,
+        }
+        for row in rows
+    ]
+    return {
+        "query": query,
+        "top_k": top_k,
+        "threshold": threshold,
+        "candidates": candidates,
+        "best_score": max((c["score"] for c in candidates), default=0.0),
+        "kept": sum(1 for c in candidates if c["kept"]),
+    }

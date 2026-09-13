@@ -332,15 +332,42 @@ def context_compaction(state: JavaTutorState) -> dict:
 
 
 def retrieve_knowledge(state: JavaTutorState) -> dict:
-    """RAG 检索节点：查询知识库，失败时降级放行。"""
-    from learning.knowledge import search_chunks
+    """RAG 检索节点：查询知识库，失败时降级放行。
+
+    成功分支同时写两个字段：
+
+    - ``retrieved_chunks``：越阈值的结果（**语义与消费方一律不变**）；
+    - ``retrieval_debug``：全量候选与阈值判定（诊断用，含被滤掉的候选）。
+
+    只做**一次**检索（`search_chunks_debug`），越阈值结果由 ``candidates`` 派生——
+    复用同一份 ``_raw_rows``，两条路径的召回阶段完全一致（见 ``tests/test_knowledge.py``
+    的等价性守卫）。省下的是一次 embedding 往返。
+
+    ``rag_degraded`` 只表示**后端失败**。检索成功但 0 条越阈值时仍为 ``False``——
+    那是「检索成功但无匹配」，与「检索故障」是两回事，混同会让诊断信号失真。
+    """
+    from learning.knowledge import search_chunks_debug
 
     try:
         query = f"{state.get('user_question', '')} {state.get('context_summary', '')}".strip()
-        chunks = search_chunks(query)
-        return {"retrieved_chunks": chunks, "rag_degraded": False}
+        debug = search_chunks_debug(query)
+        chunks = [
+            {
+                "source": c["source"],
+                "chunk_index": c["chunk_index"],
+                "content": c["content"],
+                "score": c["score"],
+            }
+            for c in debug["candidates"]
+            if c["kept"]
+        ]
+        return {"retrieved_chunks": chunks, "retrieval_debug": debug, "rag_degraded": False}
     except Exception:
-        return {"retrieved_chunks": [], "rag_degraded": True}
+        return {
+            "retrieved_chunks": [],
+            "retrieval_debug": {"candidates": []},
+            "rag_degraded": True,
+        }
 
 
 def _estimate_token_usage(state: JavaTutorState) -> dict:
@@ -393,6 +420,23 @@ def _strip_leaked_json(text: str) -> str:
     # 4. 移除结尾的工具调用 JSON（模型未执行工具时可能直接输出）
     text = _re.sub(r'\n*\s*\{\s*"tool"\s*:.*?\}\s*$', '', text, flags=_re.DOTALL)
     return text
+
+
+def _redact_denied_tools(trace_json: str, denied: set[str]) -> str:
+    """兜底出口：从 trace JSON 里剔除被拒工具名（红线在 ``build_final`` 的最后一道）。
+
+    ``build_reasoning`` 已逐条剥离提案原文，但那是「每条路径都记得剥离」式的防御——
+    将来若新增分支（或模型换一种畸形输出），后门会重新打开。这里在**拼进 answer 之前**
+    对 trace JSON 段做一次终局剔除：``denied`` 由调用方从 ``step_records`` 的
+    ``status != "ok"`` 派生（被拒工具的权威记录），替换为占位串。
+
+    只作用于 trace JSON 段（终答正文由 ``_strip_leaked_json`` 管），所以正文里作为普通词
+    出现的同名 token 不受影响。
+    """
+    for name in denied:
+        if name:
+            trace_json = trace_json.replace(f'"{name}"', '"[已拒绝]"')
+    return trace_json
 
 
 def _sanitize_code_quotes(text: str) -> str:
@@ -463,6 +507,108 @@ def verify_node(state: JavaTutorState) -> dict:
     return {"verification": result}
 
 
+def build_reasoning(
+    messages: list, max_chars: int = 1200, executed_tools: set | None = None
+) -> tuple[list[dict], bool]:
+    """从 ``agent_messages`` 提取 AI 中间思考（按序），返回 ``(reasoning, truncated)``。
+
+    ``agent_messages`` 本就是完整 ReAct 轨迹（``propose`` 每轮追加模型原始输出，
+    ``run_tools`` 追加一条合并观察），所以这里只需按序 filter 出 ``AIMessage``。
+
+    - ``round`` 用 AI 消息的出现序号（0-based）；
+    - ``tool_calls`` 复用 ``harness.contracts.parse_action`` 解析该轮输出里的工具名，
+      但**只保留 ``executed_tools`` 里的名字**——被拒（P1 未知工具 / P2 参数非法）的提案
+      **不得出现在痕迹里**：``tool_calls`` 不含被拒工具、回答里也不得出现其名字，
+      这是设计红线（spec §4.7 与 ``tests/test_harness_loop.py`` /
+      ``tests/test_harness_termination.py`` 锁死）。解析不出或未执行一律归 ``[]``；
+    - 每条 ``content`` 按 ``max_chars`` 截断，任一条超长即置 ``truncated=True``
+      （**显式截断**，不做静默裁剪）。
+
+    被解析为**提案**的那一轮（``Action`` 或 ``ParseError`` 皆然），``content`` 剥掉工具
+    JSON 负载——工具名已由结构化 ``tool_calls`` 承载，原始 JSON 不进用户可见痕迹。
+    ``ParseError``（``args`` 不是对象等）同样是提案且携带 ``tool``，若只堵 ``Action`` 分支，
+    其原文会随 ``content`` 拼进 answer，等于从 ``content`` 侧开后门泄露被拒工具名。
+    散文轮次（``parse_action`` 返回 ``None``）原样保留。
+
+    只吃 ``messages``（``executed_tools`` 由调用方从 ``step_records`` 派生），不读 state，可脱离图单测。
+    """
+    from langchain_core.messages import AIMessage
+
+    from graphs.javatutor.harness.contracts import Action, ParseError, parse_action
+
+    allowed = executed_tools or set()
+    reasoning: list[dict] = []
+    truncated = False
+    for msg in messages or []:
+        if not isinstance(msg, AIMessage):
+            continue
+        raw = msg.content if isinstance(msg.content, str) else str(msg.content)
+        parsed = parse_action(raw)
+        if isinstance(parsed, Action):
+            content = _strip_tool_json(raw)
+            tool_calls = [parsed.tool] if parsed.tool in allowed else []
+        elif isinstance(parsed, ParseError):
+            content = _strip_tool_json(raw)
+            tool_calls = []
+        else:
+            content = raw
+            tool_calls = []
+        if len(content) > max_chars:
+            content = content[:max_chars]
+            truncated = True
+        reasoning.append({"round": len(reasoning), "content": content, "tool_calls": tool_calls})
+    return reasoning, truncated
+
+
+def _strip_tool_json(text: str) -> str:
+    """从一条模型输出里剥掉工具提案 JSON，只留周边散文。
+
+    提案通常整条就是 JSON（``{"tool":...,"args":...}``），剥离后多为空串——这是**有意**的：
+    工具名已由结构化 ``tool_calls`` 承载，原始 JSON 不进用户可见的痕迹（见 ``build_reasoning``）。
+    """
+    try:
+        data = json.loads(text.strip())
+    except (json.JSONDecodeError, ValueError):
+        return text
+    if isinstance(data, dict) and data.get("tool"):
+        return ""
+    return text
+
+
+_PREVIEW_CHARS = 300
+
+
+def _build_retrieval(debug: dict | None) -> dict:
+    """把 state 的 ``retrieval_debug`` 转成 trace 的 ``retrieval``（含预览截断）。
+
+    检索层不做表现层决策：原始候选带的是完整 ``content``，截断与 ``truncated``
+    标志在这里加。缺 ``retrieval_debug`` 时返回恒存在的空壳，便于消费方无条件读。
+    """
+    if not debug:
+        return {"candidates": [], "best_score": 0.0, "kept": 0}
+    candidates = []
+    for c in debug.get("candidates") or []:
+        content = str(c.get("content", ""))
+        candidates.append(
+            {
+                "source": c.get("source", ""),
+                "chunk_index": c.get("chunk_index", 0),
+                "score": c.get("score", 0.0),
+                "preview": content[:_PREVIEW_CHARS],
+                "truncated": len(content) > _PREVIEW_CHARS,
+                "kept": bool(c.get("kept", False)),
+            }
+        )
+    return {
+        "query": debug.get("query", ""),
+        "top_k": debug.get("top_k", 0),
+        "threshold": debug.get("threshold", 0.0),
+        "candidates": candidates,
+        "best_score": debug.get("best_score", 0.0),
+        "kept": debug.get("kept", 0),
+    }
+
+
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
@@ -477,6 +623,15 @@ def build_final(state: JavaTutorState) -> dict:
     run_id = state.get("run_id", "")
     # fetch_execution_context 已作为主 Agent 工具循环的 LLM 工具调用真实产生，无需在此补记。
     tool_calls = state.get("tool_calls") or []
+    # 只有**真的执行了**的工具名才允许进 reasoning.tool_calls（被拒提案不得泄露，见函数 docstring）
+    executed_tools = {
+        r.get("tool")
+        for r in (state.get("step_records") or [])
+        if r.get("status") == "ok" and r.get("tool")
+    }
+    reasoning, reasoning_truncated = build_reasoning(
+        state.get("agent_messages") or [], executed_tools=executed_tools
+    )
 
     trace = {
         "run_id": run_id,
@@ -486,10 +641,19 @@ def build_final(state: JavaTutorState) -> dict:
         "intent": state.get("intent", "other"),
         "latency_ms": round((time.time() - float(state.get("request_started_at", time.time()))) * 1000, 1),
         "confidence": round(float(state.get("intent_confidence", 0.0)), 2),
+        # sources 只增键（retrieval_metrics.py 依赖 source / score 的既有语义）
         "sources": [
-            {"source": c["source"], "score": c.get("score", 0.0)}
+            {
+                "source": c["source"],
+                "score": c.get("score", 0.0),
+                "chunk_index": c.get("chunk_index", 0),
+                "content_preview": str(c.get("content", ""))[:_PREVIEW_CHARS],
+            }
             for c in (state.get("retrieved_chunks") or [])
         ],
+        "retrieval": _build_retrieval(state.get("retrieval_debug")),
+        "reasoning": reasoning,
+        "reasoning_truncated": reasoning_truncated,
         "critic_passed": state.get("critic_passed", True),
         "revised": state.get("revised", False),
         "fallback_reason": state.get("fallback_reason", ""),
@@ -502,6 +666,14 @@ def build_final(state: JavaTutorState) -> dict:
         "verification": state.get("verification") or {},
     }
     trace_json = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))
+    # 终局红线兜底：被拒工具名（step_records 里 status != "ok" 的权威记录）不得出现在
+    # 拼进 answer 的 trace 段里。逐条剥离之外再设一道，防未来新分支重开后门。
+    denied_tools = {
+        r.get("tool")
+        for r in (state.get("step_records") or [])
+        if r.get("status") != "ok" and r.get("tool")
+    }
+    trace_json = _redact_denied_tools(trace_json, denied_tools)
     content = f"{answer}\n\n【决策痕迹】\n{trace_json}"
     return {"messages": [AIMessage(content=content)], "answer": content, "decision_trace": trace}
 

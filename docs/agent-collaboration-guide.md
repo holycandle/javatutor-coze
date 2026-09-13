@@ -86,6 +86,22 @@ flowchart TD
 - 输出（`intent=analyze`）：结构化 JSON（复杂度、算法、数据结构标签），不经后续问答链路。
 - 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`），`verification` 为 `verify` 节点的确定性 grounding 核对结果（`applicable` / `checked` / `violations` / `hallucinated` / `grounding_ok`；无执行步骤时为 `{}` 或 `applicable=false`，明确不判罚）。回答还可附带可选的 `【视角导航】` 块（前端渲染为可点击卡片，跳转面板，协议见 `docs/spec/2026-09-07-coze-agent-view-navigation.md`）与可选的 `【编辑建议】` 块（前端渲染为 diff 卡 / 优化方案卡 / 整文件覆盖卡，`kind` 取 `patch`/`options`/`replace`，协议见 `docs/spec/2026-08-10-coze-agent-interface.md` §2.2 与 `docs/spec/2026-09-10-coze-agent-code-optimization.md`）。
 
+  决策痕迹的**过程化**三个键（2026-09-13 新增，纯增量，老消费方忽略即可）：
+
+  - `retrieval`：RAG 检索全过程。含 `query` / `top_k` / `threshold` / `best_score` / `kept` 与 `candidates`。
+    **`candidates` 含被阈值滤掉的候选**（每条带 `kept: false`），因此「检索没召回到」与「召回到但被阈值滤掉」
+    在痕迹里可区分——这是此前无法定案的那个盲区（部署侧 `sources` 恒空而 `rag_degraded=false`）。
+    候选带的是 `preview`（`content` 截 300 字）+ `truncated` 标志，不携带完整正文。缺 `retrieval_debug` 时恒为 `{candidates: [], best_score: 0.0, kept: 0}`。
+  - `reasoning`：工具调用之间的 AI 思考片段，按轮次给出（`round` / `content` / `tool_calls`），
+    取自累积的 `agent_messages` 中按序的 `AIMessage`。任一条超 1200 字即截断并置顶层 `reasoning_truncated: true`（显式，不静默裁剪）。
+    **`tool_calls` 只含真的执行过的工具名**（由 `step_records` 的 `status == "ok"` 派生）——被拒的提案
+    （P1 未知工具 / P2 参数非法）既不进 `tool_calls`，其工具名也不得出现在痕迹或回答里
+    （与 `tool_calls` 同口径，见 spec §4.7）。提案轮的原始 JSON 同样不复制进 `content`。
+  - `sources` 增强：在既有 `source` / `score` 之外**新增** `chunk_index` 与 `content_preview`；
+    **`source` / `score` 的键与语义不变**（`eval/runner/retrieval_metrics.py` 依赖，只增不改）。
+
+  `rag_degraded` 语义不变：**仅在后端失败时为 `true`**；「检索成功但 0 条越阈值」不置位（那是「无匹配」而非「故障」，混同会让诊断信号失真）。
+
 图内循环新增的状态字段（`state.py`，均为增量，不改动既有字段语义）：
 
 - `agent_messages`：主 Agent 循环的**累积**消息序列（System / Human / AI / Human…）。与 `messages` 分开——后者是入站契约（`parse_context` 读其最后一条，平台 `stream_mode="messages"` 与它耦合），不能被循环过程污染。
@@ -95,6 +111,7 @@ flowchart TD
 - `served_step_indices`：本请求内已成功查询过的 `step_index`（0-based），供门闩 P5 判重复。
 - `fetched_injected`：本请求是否已把执行上下文读进 state（自动前置 fetch 或模型显式 fetch 都会置位）。
 - `verification`：`verify` 节点的确定性 grounding 核对结果。
+- `retrieval_debug`：RAG 全量候选与阈值判定（含被滤掉的候选），供 `retrieval` 痕迹与诊断使用。与 `retrieved_chunks`（越阈值结果）分开；检索失败时仍存在（`candidates == []`），以区别「失败」与「成功但无匹配」。
 
 ## 上手三件事
 

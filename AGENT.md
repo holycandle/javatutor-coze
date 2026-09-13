@@ -26,6 +26,9 @@
 | 联调修复 spec 变更（优化候选自动返修 / 测试模式运行上下文） | 已执行（写入既有 spec） |
 | 联调修复 plan（自动返修 + 测试模式上下文） | 已执行（含跨仓前端/后端改动） |
 | 联调修复 review（自动返修 + 测试模式上下文） | 已处理（1 P2 / 6 P3 全部处置；2 条建议未采纳并附理由，见两份 devlog §8） |
+| RAG 可观测性 + 痕迹过程化 spec | 已定稿 |
+| RAG 可观测性 + 痕迹过程化 plan | 已执行（Task 1–8 离线全绿；Task 9 重发取数待合入窗口） |
+| RAG 可观测性 + 痕迹过程化 review | 已审查（1 P1 / 2 P3）**已全部处置**：P1 `ParseError` 分支 content 泄露两层堵 + 终局兜底；P3-1 `best_score` 改取最高分；P3-2 盲并教训进指南 |
 
 ## 规约与文档索引
 
@@ -82,6 +85,10 @@
 | 优化候选自动返修实现 | `docs/devlog/2026-09-12-coze-agent-optimization-gate-retry.md` | 门禁失败后自动返修（上限 2 次、原地替换卡片、只在最新 assistant 消息、传输失败只重跑门禁）+ coze 返修引导段（前端 383 / coze 327，3 处计划偏差含 `regate` 闩防 fetch 风暴；review 5 项处置见 §8：重跑通知量收到**消息级**、返修状态机补 7 条回归） |
 | 测试模式上下文修复实现 | `docs/devlog/2026-09-12-coze-agent-test-mode-context.md` | `run_mode`/`test_case_count` 透传 → state → `### 运行模式` packet + 评审核对 facts 行 + 引导段 + 本体扩充（后端 126 / coze 327，5 处计划偏差含后端基线口径更正 124→123；review 3 项处置见 §8：`user_guides` 只进主 Agent、本体去重） |
 | 联调修复 review | `docs/reviews/2026-09-12-coze-agent-optimization-retry-and-test-mode-review.md` | 两件联调修复执行审查（1 P2 / 6 P3，不阻塞合并），**已全部处置**：P2-1 补返修状态机回归网；P3-1 订正计划自身的「本体同时被 Judge 消费」事实性错误（`user_guides` 只进主 Agent）；P3-4 同步 spec §8/§9/§11；P3-6 重跑 nonce 由全局收到消息级（顺带消 P3-3(b)）；P3-2 复核后**前提不成立**（门禁走裸 `fetch`，`httpStatus` 分支可达），改记真实的三条到达路径；另附后端用例计数陷阱（陈旧 surefire 报告会多算 1） |
+| RAG 可观测性 + 痕迹过程化设计 | `docs/spec/2026-09-13-rag-observability-and-trace-process-design.md` | 先让静默瘫痪四轮的 RAG 可见（暴露全量候选 + 指标进 summary），再把决策痕迹升级为完整过程（`retrieval` / `reasoning` / `sources` 增强） |
+| RAG 可观测性 + 痕迹过程化计划 | `docs/plan/2026-09-13-rag-observability-and-trace-process-plan.md` | 上述设计的 TDD 实施计划（Task 1–8 离线交付，Task 9 重发取数属合入窗口） |
+| RAG 可观测性 + 痕迹过程化实现 | `docs/devlog/2026-09-13-rag-observability-and-trace-process.md` | `search_chunks_debug` + `retrieval_debug` + `retrieval`/`reasoning` trace + 检索指标进 summary + 前端「思考过程」（coze 368 / 前端 390，3 处计划偏差含不得泄露红线修正与检索分母覆盖 `total` 的修复；review 1 P1 / 2 P3 处置见 §8：`ParseError` 分支 content 泄露两层堵 + 终局兜底 `_redact_denied_tools`、`best_score` 改取最高分、盲并教训进指南） |
+| RAG 可观测性 + 痕迹过程化 review | `docs/reviews/2026-09-13-rag-observability-and-trace-process-review.md` | 执行审查（**1 P1 / 2 P3**）：红线修复不完整——`ParseError` 分支的 `reasoning[].content` 仍含工具名，实测经真实图泄露进 answer（`tool_calls` 侧已堵、`content` 侧未堵）；P3-1 `best_score` 依赖 fetcher 排序无断言；P3-2 盲并教训未进指南 |
 
 ## 文档规范
 

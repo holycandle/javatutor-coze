@@ -120,6 +120,31 @@ def test_unknown_tool_spam_never_reaches_execution():
     assert "no_such_tool" not in out["answer"]
 
 
+def test_parse_error_proposal_never_leaks_tool_name_into_answer():
+    """``args`` 非对象（``ParseError``）的提案同样不得把工具名带进 answer。
+
+    ``ParseError`` 是模型真实的畸形输出（P2 参数结构校验就是为它存在），
+    ``propose.py`` / ``guard.py`` 都专门处理它，属设计内的常见路径。
+    ``tool_calls`` 侧早已堵住，但它曾从 ``reasoning[].content`` 侧泄露——
+    trace 是拼进 answer 的，故这条同时守住两条路径。
+
+    用**合法白名单工具**配非法 ``args``，才能真正走到 P2（未知工具会先被 P1 拦下）。
+    """
+    model = SpamModel('{"tool": "step_facts", "args": [1, 2]}')  # args 是数组，非对象
+    compiled = build_flow_graph().compile()
+    out = compiled.invoke(
+        {"messages": [HumanMessage(content=json.dumps(_payload(), ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+    )
+
+    assert [r["policy"] for r in out["step_records"]] == ["P2"] * MAX_ROUNDS
+    assert out["answer"]
+    assert "step_facts" not in out["answer"]
+    assert all(
+        "step_facts" not in r["content"] for r in out["decision_trace"]["reasoning"]
+    )
+
+
 def test_direct_answer_never_enters_the_loop():
     """无需工具的问题：guard/run_tools 一次都不进（不白花轮次）。"""
     model = SpamModel("直接回答就好")  # 散文，parse_action 返回 None
