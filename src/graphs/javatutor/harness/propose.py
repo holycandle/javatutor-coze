@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from graphs.javatutor.harness.contracts import ParseError, parse_action
 from graphs.javatutor.harness.guard import MAX_ROUNDS
 from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
+from graphs.javatutor.prompting.intent_guidance import render_intent_guidance
 from graphs.javatutor.prompting.main_fewshots import get_main_few_shots
 from graphs.javatutor.prompting.optimization import render_optimization_guidance
 from graphs.javatutor.prompting.panels import (
@@ -35,13 +36,20 @@ CONVERGENCE_INSTRUCTION = (
 CONVERGENCE_PREFIX = "（工具轮次预算已用尽，以下为已获得的执行证据）"
 
 
-def _main_system_prompt() -> str:
-    """主 Agent 系统提示 = 模板 + 运行时注入的导航引导 / 算法目录 / 使用指南 / 优化引导 / 运行模式判读 / 面板图 / few-shot（随 manifest 联动）。"""
+def _main_system_prompt(intent: str = "") -> str:
+    """主 Agent 系统提示 = 模板 + 运行时注入的导航引导 / 算法目录 / 使用指南 / 优化引导 / 运行模式判读 / 面板图 / 意图引导 / few-shot（随 manifest 联动）。
+
+    ``intent`` 为 concept / debug / other 时在 few-shot 之前追加「本轮问题类型」段；
+    ``data_query`` 与空串**不追加**，保证既有基线逐字不变
+    （见 ``prompting/intent_guidance.py`` 的模块 docstring）。
+    """
     few = "\n\n".join(get_main_few_shots())
+    guidance = render_intent_guidance(intent)
+    intent_part = f"{guidance}\n\n" if guidance else ""
     return (
         f"{SYSTEM_PROMPT_MAIN_AGENT}\n\n{render_nav_guidance()}\n\n{render_algo_catalog()}\n\n"
         f"{render_usage_guide()}\n\n{render_optimization_guidance()}\n\n{render_run_mode_guide()}\n\n"
-        f"{render_ui_map()}\n\n## 回答示例\n{few}"
+        f"{render_ui_map()}\n\n{intent_part}## 回答示例\n{few}"
     )
 
 
@@ -85,7 +93,7 @@ def propose(state, model=None) -> dict[str, Any]:
     history = list(state.get("agent_messages") or [])
     if not history:
         history = [
-            SystemMessage(content=_main_system_prompt()),
+            SystemMessage(content=_main_system_prompt(state.get("intent", ""))),
             HumanMessage(content=f"{state.get('context_built', '')}\n\n[当前轮次] 1/{MAX_ROUNDS}"),
         ]
 

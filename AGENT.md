@@ -34,6 +34,9 @@
 | 过程式输出计划 | 已执行（Task 1–8 离线全绿；L4 本地冒烟 SKIP，首屏实测待重发联调窗口） |
 | 裸 JSON 剥离 + 过程式输出 review | 已审查（**1 P1 / 1 P2 / 2 P3**）：哨兵特性成立且按要求流出；但**剥离未命中报告 bug 的根因**——症状主因是既有「提案 JSON 随 `answer` delta 流出 + 前端纯累加」，剥离作用于 `state["answer"]` 够不到流；连带 spec §5-6 红线验收为**假绿**（全流确含被拒工具名），故 devlog §3.2 #6 须由 ✅ 改 ❌ |
 | 联调修复计划（fetch 取不到源码 + 回答重复两遍） | 已执行（Task 1–8 离线全绿：coze 424 / 前端 440；3 处计划偏差 + 1 处计划外改进；**Task 0 现场证据仍待联调侧**；L4 本地冒烟 SKIP，线上未验证） |
+| 联调修复计划（概念题被当「当前步」作答 + 优化第二步不出代码） | 已执行（Task 1–4 / 6–7 / 9–10 离线全绿：coze 447（本件完成时）/ 前端 445；与下述评审优化合并后 coze **484**；**Task 5 / Task 8 已按 §6 不再单独执行**——其内容由下述评审优化 spec 的 CD-4 取代、D6 收编进 Plan A Task 3，避免两份计划并行改评审表。**Bug D 根因定位为判别器冲突**（第二步提问形状 = 「已指明目标」形状，同形输入要求走两条分支）⇒ 判别器改为显式 `【优化第二步】` 标记，由前端写进提问、两侧字面量硬编码。**Task 0 现场证据仍待联调侧**；线上未验证） |
+| 评审-修订子系统优化 spec | 已执行（联调反馈「评审很鸡肋，总把较正确的答案改得答非所问」；**量化取证**：四轮归档 124 样本中评审拦截 33 条，其中 **11 条 Judge 判 `correct`（误杀 33%）**，`incorrect` 只拦下 10/22（召回 45%），修订请求时延 +48%；6 条决策 CD-1…CD-6：回滚闸 / 最小编辑 / 意见必须给出处 / 评审表分流 + 补「正面回答」条 / advisory 开关 / 可观测性） |
+| 评审-修订子系统优化计划 | 已执行（Task 0–7 离线全绿：coze **484 passed**（基线 431）/ 前端 445 / `npm run build` ok / L5 外壳两条命令均无输出；`tools/critic_audit.py eval/archive` 与设计 §1.2 逐格一致。**CD-2 在两份计划里都无对应 Task（计划漏列），已按设计依据补进 Task 3**——只收回滚闸不改提示词会让修订必然回退，见 devlog §4.1。另一处偏差：既有用例的语义变更实为 **6 个**（计划列 4 个走相似度回退分支，另 2 个因 CD-3 的 quote-or-drop 而失效），原意均保留。**Task 8 端到端取证须先重发 agent，未做——线上未验证**） |
 
 ## 规约与文档索引
 
@@ -104,6 +107,12 @@
 
 | 联调修复计划 | `docs/plan/2026-09-14-fix-fetch-context-and-duplicate-answer-plan.md` | 2026-09-14 联调两 bug：**A 回答正文重复两遍**（已用真实图 + SDK 全链路复现，根因 = `propose` 终答轮把终答写进 `agent_messages` 致其随 `answer` delta 流出，与 `build_final` 构成重复）；**B fetch 调了却「没有源码」**（五条各自独立确认的缺陷：前端 `multiState.entryFile` 从未被赋值、`_resolve_code` 静默回落 `source_code` 且 `file` 恒空、`files` 非空+`entry_file` 空时「成功但空」无信号、P4 阈值只覆盖 `len(files) > 1`、`switchMode('single')` 不清 `multiState.files`）；跨 coze + 前端 |
 | 联调修复实现 | `docs/devlog/2026-09-14-fix-fetch-context-and-duplicate-answer.md` | 上述两 bug 的实施记录：`propose` 终答/收束轮不入 `agent_messages`（根治重复正文）、`_resolve_code` 六级有序解析 + 自描述回包（`file`/`file_source`/`code_chars`）+ 取消「成功但空」、P4 判据改按 `match_file_key` 匹配不到、前端 `entryFile` 接线（`refreshEntryFile`）+ 按模式裁剪提问体（coze 424 / 前端 440，3 处计划偏差 + 1 处计划外改进；Task 0 现场证据待联调侧，L4 SKIP 线上未验证）。**§6 追加**：联调反馈「执行过程区不再显示 Main.java」——排查为「痕迹只反映模型想读什么（`args`）而非实际读到什么（`result`）」的结构性缺口，前端补 fetch 专用渲染（`→ Main.java（主入口），1234 字` / `→ 失败：…`），前端 444 passed |
+
+| 联调修复计划 | `docs/plan/2026-09-14-fix-concept-intent-and-optimization-loop-plan.md` | 2026-09-14 联调两 bug：**C 概念题被当「当前步」作答/概念回答被评审误杀**（根因：`intent` 在作答路径上**无任何消费者**——`_main_system_prompt` 不收 state、`gather` 不注入意图、`build_context_node` 硬编码 `"other"`；另加「当前执行位置」无条件注入 + 概念 few-shot 为 0 + 评审核对表为 data_query 而写且无意图门）；**D 优化第二步不出代码**（**已线上复现**：两步式**没有判别器**——spec §4.3 要求「用户已指明目标仍先出方案卡」，而第二步提问就是「已指明目标」的形状；评审又被明文禁止因 `kind` 判失败）；修法 = 前端 `【优化第二步】` 标记做判别器 + 意图接进提示与评审；跨 coze + 前端。**评审侧 D5/D6 已移交评审优化计划** |
+| 评审-修订优化设计 | `docs/spec/2026-09-14-critic-revise-optimization-design.md` | 评审-修订子系统的优化设计：**修订不可回滚**（`critic→revise` 无条件、`verify` 明文只记录不路由 ⇒ 全链路无环节能发现「改差了」）+ **自由重写**（body 整段丢弃重生成，事实块偏向当前步）+ **意见无需出处**（第 6 条是格式规则，概念题必误杀）+ **评审表缺「是否正面回答学生问题」**；决策 CD-1…CD-6；**取代**深化设计 D-02/D-10，**取代/收编**上表的 D5/D6 |
+| 评审-修订优化计划 | `docs/plan/2026-09-14-critic-revise-optimization-plan.md` | 上述设计的 TDD 实施计划（Task 0 审计工具 / Task 1 回滚闸 G1-G2（最高价值）/ Task 2 意见必须给出处 / Task 3 评审表分流 + 正面回答条 / Task 4 G3-G4 / Task 5 advisory 开关 / Task 6 痕迹与指标 / Task 7 文档 / Task 8 端到端取证）；含 **4 个既有用例的语义变更清单** 与 `tools/critic_audit.py` 复跑口径 |
+| 评审-修订优化实现 | `docs/devlog/2026-09-14-critic-revise-optimization.md` | 四道验收闸（G1 相似度 / G2 结构化块保全 / G3 引用不劣化 / G4 二次评审）+ 意见须给出处 + 评审表按意图分流 + `critic_mode` advisory 开关 + 痕迹三键与 `critic_agree_with_judge` 指标（coze 484 / 前端 445，L5 无输出；**§4.1 记 CD-2 计划漏列**、§4.2 语义变更用例实为 6 个、§4.3 六项实现选择含 `revise_recheck_passed` 仅在真跑过时出现；**Task 8 端到端取证未做，线上未验证**） |
+| 概念题意图 + 优化第二步实现 | `docs/devlog/2026-09-14-concept-intent-and-optimization-loop.md` | `intent` 接入作答路径（`render_intent_guidance` / `_main_system_prompt(intent)` / `gather` 位置包门控 / 契约按意图取）+ 第二步判别器改显式 `【优化第二步】` 标记（跨仓字面量两侧硬编码 + 互读对方文件的断言）+ 概念类 few-shot（coze 447→484 / 前端 445）。**取证不对称必须分开说**：实测 1 复现了「概念回答被误杀」，实测 2 **未**复现「答成当前步」，故 Bug C 的修法按三条结构性缺陷计为**预防而非已确认触发条件的修复**；Bug D 已端到端复现（实测 4，根因判别器冲突） |
 
 ## 文档规范
 

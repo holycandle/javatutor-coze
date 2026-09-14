@@ -37,6 +37,10 @@ FRONTEND_OPTIMIZATION = (
 RETRY_MARK_HEADER = "上一版优化代码没有通过编译/运行校验"
 RETRY_MARK_CANDIDATE = "上一版候选代码"
 
+# 第二步标记：**唯一**的「这是第二步提问」判别器，前端 buildGoalPrompt 写进提问、
+# coze 引导据此认出。同样两侧硬编码字面量（跨仓握手）。
+STEP2_MARKER_LITERAL = "【优化第二步】"
+
 
 def _frontend_goals() -> dict:
     """从后端仓库直接读前端 GOALS——闭集是跨仓契约，手抄副本自证不了漂移。"""
@@ -178,6 +182,57 @@ def test_fewshots_second_round_states_exclusions():
     # 单方向样例的黑名单必须与引导同款措辞
     joined = "\n".join(get_main_few_shots())
     assert "不要顺带做其他方向的改动（例如：" in joined
+
+
+def test_step2_marker_is_the_discriminator():
+    """判别器只有一个：提问是否以【优化第二步】起头（计划 2026-09-14 D1）。
+
+    旧判别依据「措辞像已指明目标」与第二步提问形状**直接冲突**——同形输入被要求走两条分支，
+    模型无法判别，实测表现为「再给一次一模一样的方案卡、一行代码都没有」的死循环。
+    """
+    text = render_optimization_guidance()
+    assert STEP2_MARKER_LITERAL in text
+    assert "判别器只有一个" in text
+    # 标记存在 ⇒ 交付 replace、禁止再出方案卡
+    assert "禁止再出 `options`" in text
+
+
+def test_step2_marker_matches_frontend_literal():
+    """标记是**跨仓握手字面量**：前端 `buildGoalPrompt` 写什么，coze 才认得什么。
+
+    一侧改字另一侧静默失配（agent 退回「再给一张方案卡」），所以这里真的读前端文件比对。
+    """
+    from graphs.javatutor.prompting.optimization import STEP2_MARKER
+
+    assert STEP2_MARKER == STEP2_MARKER_LITERAL
+    if not FRONTEND_EDIT_SUGGESTION.exists():
+        pytest.skip("前端 editSuggestion.js 不存在，跳过跨仓比对")
+    frontend = FRONTEND_EDIT_SUGGESTION.read_text(encoding="utf-8")
+    assert f"export const STEP2_MARKER = '{STEP2_MARKER_LITERAL}'" in frontend, (
+        "前端 editSuggestion.js 的 STEP2_MARKER 与 coze 引导不再一致"
+    )
+    assert "return `${STEP2_MARKER}" in frontend, "前端 buildGoalPrompt 未把标记写进提问开头"
+
+
+def test_no_contradicting_bullet():
+    """旧判别依据那条冲突条目必须消失（保留它 = 保留 Bug D）。"""
+    text = render_optimization_guidance()
+    assert "用户已指明目标" not in text
+    assert "同样先出方案卡" not in text
+    # 但「无标记时先出方案卡」这一既有产品决策**保留**，只是改用标记表述
+    assert "没有标记就是第一步" in text
+
+
+def test_few_shots_step2_questions_carry_marker():
+    """两条第二步示例的**提问文本**必须与前端模板同形（否则 few-shot 教的是另一种形状）。"""
+    marked = 0
+    for s in get_main_few_shots():
+        if "【编辑建议】" not in s or '"kind":"replace"' not in s:
+            continue
+        assert f"问：{STEP2_MARKER_LITERAL}" in s, "第二步示例的提问必须以【优化第二步】起头"
+        assert "只做" in s.split("【编辑建议】")[0]
+        marked += 1
+    assert marked == 2, f"第二步示例应为 2 条（单方向 + 多方向），实际 {marked}"
 
 
 def _retry_section() -> str:

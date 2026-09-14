@@ -121,11 +121,26 @@ def build_other_context(state: dict[str, Any]) -> str:
     return _with_rag(_base_context(state), state)
 
 
+# 意图 → 事实块里的「问题类型」标签。评审据此决定是否要求步骤级引用（CD-4 意图门）：
+# 概念讲解、优化方案本来就没有可引的执行步骤，引用与格式类规则必须让路。
+_INTENT_LABELS = {
+    "concept": "概念讲解（本题没有可引的执行步骤证据）",
+    "data_query": "执行数据查询（回答若引用步骤/行/变量值，须与步骤证据一致）",
+    "debug": "报错排查（回答须定位到真实的错误位置与原因）",
+    "other": "其他",
+}
+
+
 def build_facts_block(state: dict[str, Any]) -> str:
     lines = [
         f"学生问题：{state.get('user_question', '')}",
         f"编译错误：{state.get('compile_error', '')}",
     ]
+    # 问题类型（意图）。评审看不到意图时会把「概念题不引用步骤」当成漏引而误杀。
+    # 缺失（旧客户端 / 未分类）⇒ 不加行，零行为变化。
+    intent = state.get("intent")
+    if intent:
+        lines.append(f"问题类型：{_INTENT_LABELS.get(intent, intent)}")
     # 运行模式事实（前端报、后端透传）。与「编译错误」同理：评审要核对回答里的断言，
     # 就必须看得到该断言所依赖的事实，否则会把「当前是默认模式」这类正确解释误判为幻觉。
     # 缺失（旧客户端）⇒ 不加行，零行为变化。

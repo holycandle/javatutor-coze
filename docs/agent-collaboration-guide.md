@@ -166,6 +166,13 @@ id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，
 - 输入：`run_id`、`session_id`、`user_question`、可选 `intent`；可选 `run_mode`（`"test"`/`"default"`）与 `test_case_count`
   ——本次运行的模式**事实**，由前端随每次提问送来（后端透传）；**两者同时出现或同时缺失**，缺失表示**模式未知**
   （不得当成默认模式）。语义（两种模式各要求什么）在 coze 侧知识与引导里，见 `docs/spec/2026-08-10-coze-agent-interface.md` §1.1。
+- **`intent` 会改变上下文与评审口径（2026-09-14 增）**：`concept`（概念题）不再注入 `### 当前执行位置`
+  （步骤/行号/变量）——此前**任何**问题都注入该 packet（relevance 0.9，全上下文最高），叠加 few-shot 里
+  0 条概念类样本，导致「迪杰斯特拉算法的原理是什么？」被答成「当前这一步在做什么」；
+  另外 `build_context_node` 的 `system_instructions` 由写死的 `other` 契约改为按意图取契约，
+  主 Agent 系统提示按意图追加引导段（概念题：直接讲概念本身）。分流表见接口规格 §1 的「`intent` 的下游影响」。
+  注意：提问 → intent 的归并仍在演进（启发式关键词见 `intent_rules.py::conservative_intent`），
+  用途限于引导与评审口径，不得当成绝对真理。
 - 输出（`intent=analyze`）：结构化 JSON（复杂度、算法、数据结构标签），不经后续问答链路。
 - 输出（其他 intent）：回答正文，末尾带 `【决策痕迹】` 后的一段 JSON，记录意图、来源、工具调用、token、耗时和降级标记；其中 `tool_calls` 为主 Agent 工具循环里真实产生的 LLM 工具调用（`fetch_execution_context` / `step_facts`），**2026-09-14 起 `fetch_execution_context` 的记录也带 `result`**（**两条路径都是合法 JSON**，消费方统一 `json.loads`；成功为 `{"stored": true, "file", "file_source", "code_chars", ...}` 摘要且**不含 `code`**，失败为 `{"stored": false, "error": ...}`；`step_facts` 一直有），使「调了 fetch 却拿不到源码」能自证，`verification` 为 `verify` 节点的确定性 grounding 核对结果（`applicable` / `checked` / `violations` / `hallucinated` / `grounding_ok`；无执行步骤时为 `{}` 或 `applicable=false`，明确不判罚）。回答还可附带可选的 `【视角导航】` 块（前端渲染为可点击卡片，跳转面板，协议见 `docs/spec/2026-09-07-coze-agent-view-navigation.md`）与可选的 `【编辑建议】` 块（前端渲染为 diff 卡 / 优化方案卡 / 整文件覆盖卡，`kind` 取 `patch`/`options`/`replace`，协议见 `docs/spec/2026-08-10-coze-agent-interface.md` §2.2 与 `docs/spec/2026-09-10-coze-agent-code-optimization.md`）。
 
@@ -184,6 +191,20 @@ id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，
     **`source` / `score` 的键与语义不变**（`eval/runner/retrieval_metrics.py` 依赖，只增不改）。
 
   `rag_degraded` 语义不变：**仅在后端失败时为 `true`**；「检索成功但 0 条越阈值」不置位（那是「无匹配」而非「故障」，混同会让诊断信号失真）。
+
+  决策痕迹的**评审三键**（2026-09-14 新增，纯增量）：
+
+  - `critic_issues`：评审留下的**有效**意见（`claim` / `answer_span` / `fact` / `blocking`，文本各截 300 字）。
+    「有效」= 出处可核实（`answer_span` 是回答子串、`fact` 是事实块子串）——给不出出处的意见会被流水线
+    机械丢弃，痕迹里也看不到，故此键与「评审实际据以行动的那份意见」**同源**。
+  - `revise_outcome`：`"accepted"`（修订稿被采纳）/ `"reverted"`（过不了验收闸，回退原答）/
+    `"skipped"`（未触发 / 调用异常 / advisory 模式）。缺省 `"skipped"`。
+  - `revise_revert_reason`：回退原因，未回退时 `""`。取值 `"similarity"`（题旨漂移）/
+    `"nav_block"` / `"edit_block"`（修订稿丢了结构化块）/ `"grounding"`（修订稿凭空多出假引用）/
+    `"recheck"`（二次评审仍判失败）。
+  - **`revised` 语义收窄**（同日）：从「修订节点跑过」改为「修订稿**被采纳**」。回退时它为 `false`，
+    因为用户拿到的就是原答。要看「是否触发过修订」请用 `revise_outcome`。
+    另有 `revise_recheck_passed`（仅在二次评审**真的跑过**时出现，`false` 不等于答案有问题）。
 
   终态回答里**不含**过程哨兵：哨兵只在生成期间作为 delta 流出（见「过程哨兵」小节），
   由 `build_final` 清除。前端需在**渲染前**拦下并剥离，剥离后的正文与不带哨兵时逐字相等。

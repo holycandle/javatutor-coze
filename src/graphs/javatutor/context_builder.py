@@ -102,8 +102,13 @@ def gather(state, history=None, memories=None) -> list[ContextPacket]:
                 metadata={"section": "Memory"},
             )
         )
-    has_position = bool(state.get("has_steps")) or (
-        state.get("current_step_index") not in (None, 0)
+    # 概念题不注入「当前执行位置」：该块对**每一道题**都以 relevance 0.9 落 [Evidence]，
+    # 是「概念题被当当前步作答」的直接上下文锚点（计划 2026-09-14 D3）。
+    # 概念题可从代码 + 知识作答，不需要「第几步/第几行」；`### 项目结构` 保留，
+    # 以便模型仍能按文件名用 `file` 参数取代码。
+    has_position = state.get("intent") != "concept" and (
+        bool(state.get("has_steps"))
+        or state.get("current_step_index") not in (None, 0)
         or state.get("current_line") not in (None, 0)
     )
     if has_position:

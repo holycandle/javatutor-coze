@@ -6,6 +6,8 @@ from typing import Callable
 
 from graphs.javatutor.intent_rules import conservative_intent, fact_matches
 
+from .critic_agreement import aggregate_critic_agreement
+
 
 def load_jsonl(path) -> list[dict]:
     p = Path(path)
@@ -67,4 +69,25 @@ def run_component_cases(
         "rag_hit_at_3": _safe(rag_hit, rag_total),
         "pass_rate": pass_rate,
         "results": results,
+    }
+
+
+def critic_agreement_metrics(records: list[dict]) -> dict:
+    """评审与 Judge 的一致性指标（CD-1/CD-6），输入是 `judged.jsonl` 记录。
+
+    与 `tools/critic_audit.py` 共用 `runner.critic_agreement` 的聚合实现——
+    两套口径分叉的话，「评审拦得对不对」会随入口不同给出两个答案。
+    本函数只挑 summary 需要的键，逐格分子分母留在离线工具里看。
+
+    无记录 ⇒ 全零同形状（`critic_fail_rate=0.0`、`precision/recall/n` 全 0）。
+    """
+    agg = aggregate_critic_agreement(records)
+    agree = agg["critic_agree_with_judge"]
+    return {
+        "critic_fail_rate": agg["critic_fail_rate"],
+        "critic_agree_with_judge": {
+            "precision": agree["precision"],
+            "recall": agree["recall"],
+            "n": agree["n"],
+        },
     }

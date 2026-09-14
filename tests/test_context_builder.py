@@ -98,6 +98,20 @@ def test_gather_position_annotates_current_step_file():
     assert "当前步所在文件: Other.java" in pos
 
 
+def test_concept_omits_position_packet():
+    """概念题不注入「### 当前执行位置」：该块是「概念题被当当前步作答」的上下文锚点（D3）。"""
+    packets = gather({**STATE, "intent": "concept"}, history=[], memories=[])
+    combined = "\n".join(p.content for p in packets)
+    assert "### 当前执行位置" not in combined
+
+
+def test_data_query_keeps_position_packet():
+    """钉住既有行为：非概念意图照旧注入位置块。"""
+    packets = gather({**STATE, "intent": "data_query"}, history=[], memories=[])
+    combined = "\n".join(p.content for p in packets)
+    assert "### 当前执行位置" in combined
+
+
 def test_gather_injects_project_overview():
     state = {
         "user_question": "跨文件关系？",

@@ -287,7 +287,18 @@ class TestDeepFlow:
             def invoke(self, messages):
                 content = messages[0].content
                 if "回答评审" in content:
-                    return AIMessage(content='{"pass": false, "issues": ["变量值与数据不符"]}')
+                    # CD-3：意见必须给出处（answer_span 为原答子串、fact 为事实块子串）；
+                    # blocking: true 豁免 CD-1 的相似度闸（「原始回答有误」与「修订后的正确回答」
+                    # 相似度为 0，无豁免必然回退）。本用例验的是路由。
+                    return AIMessage(content=json.dumps({
+                        "pass": False,
+                        "issues": [{
+                            "claim": "变量值与数据不符",
+                            "answer_span": "原始回答有误",
+                            "fact": "学生问题：为什么 arr 变了？",
+                            "blocking": True,
+                        }],
+                    }, ensure_ascii=False))
                 if "回答修订者" in content:
                     return AIMessage(content="修订后的正确回答")
                 return AIMessage(content="原始回答有误")
@@ -314,6 +325,23 @@ def test_build_context_includes_ontology():
     assert "变量卡片" in text
     assert "堆面板" in text
     assert "禁止编造引擎内部机制" in text
+
+
+def test_build_context_node_uses_intent_contract():
+    """输出契约不再硬编码 "other"：概念题拿到概念契约与概念角色（计划 2026-09-14 D4）。
+
+    根因同 D2——意图的产物在作答路径上没有消费者。
+    """
+    from graphs.javatutor.nodes import build_context_node
+
+    base = {"user_question": "HashMap 原理", "source_code": "public class A {}", "messages": [], "memories": []}
+    concept = build_context_node({**base, "intent": "concept"})["context_built"]
+    assert "禁止脱离本次代码空谈教材内容" in concept  # CONTRACTS["concept"]
+    assert "算法与数据结构教育专家" in concept  # 概念角色句
+
+    missing = build_context_node(base)["context_built"]
+    assert "回答工具使用问题时给出可操作指引" in missing  # CONTRACTS["other"]
+    assert "算法与数据结构教育专家" not in missing
 
 
 # ── 过程哨兵（Plan A Task 2）：build_context / retrieve_knowledge 发射 ──────────────

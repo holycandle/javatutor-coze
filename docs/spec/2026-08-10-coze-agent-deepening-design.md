@@ -29,7 +29,7 @@
 ## 3. Decisions
 
 - **D-01**：核心范式为 Orchestrator-Specialist-Critic（编排-专家-评审）。
-- **D-02**：评审-修订只跑一轮，最多 2 次生成，修订后直接输出。
+- **D-02**：评审-修订只跑一轮，最多 2 次生成；**修订稿须通过验收闸（相似度 / 结构块保全 / 引用不劣化 / 二次评审）才被采纳，不过则回退原答**。（2026-09-14 修订，见 `2026-09-14-critic-revise-optimization-design.md` CD-1）
 - **D-03**：自由问答意图识别由 LLM 完成，输出结构化 JSON，替代关键词匹配。
 - **D-04**：保留显式 `intent` 与 `compile_error` 两条确定性短路。
 - **D-05**：低置信度（< 0.6）意图降级为 `other`，trace 记录原因。
@@ -37,11 +37,11 @@
 - **D-07**：Embedding 使用 Coze 平台内置 Doubao-embedding-vision。
 - **D-08**：M1 语料由团队预置，格式为 Markdown/TXT + 结构化 JSON，不开放上传。
 - **D-09**：四个文本专家回答前统一注入检索结果，回答必须标注知识来源。
-- **D-10**：评审 Agent 对照真实 steps / compile_error / 检索来源核查回答。
+- **D-10**：评审 Agent 对照真实 steps / compile_error / 检索来源核查回答；**每条意见必须给出处**（`answer_span` 为回答子串、`fact` 为事实块子串，否则机械丢弃）；**引用类规则仅在回答中出现该类引用时才核对**，格式类检查（语言标签 / 单字符行 / 与 `line_text` 一致性）只记轻微问题不判失败；并核查「是否正面回答了学生问题」。（2026-09-14 修订，见同上 CD-3 / CD-4）
 - **D-11**：steps 超过 200 步时执行上下文压缩；压缩失败则截断注入。
 - **D-12**：决策痕迹以 JSON 追加在回答文本尾部，透传链路不改。
 - **D-13**：检索结果低于余弦阈值 0.3 时返回空，不硬塞无关语料。
-- **D-14**：检索/评审/修订任一环节失败均降级放行，不阻塞回答。
+- **D-14**：检索/评审/修订任一环节失败均降级放行，不阻塞回答。**显式形态为 `critic_mode` 配置**（`enforce` 默认 / `advisory`：评审照跑照记痕迹但不触发修订）。（2026-09-14 补，见同上 CD-5）
 - **D-15**：`build_agent()` / `AgentBundle` 契约与 `src/main.py` 外壳不变。
 - **D-16**：实现目标环境为 Coze 项目工作区（`/workspace/projects`）；本地 `projects` 目录仅作只读参考。
 
@@ -120,9 +120,20 @@ decision_trace: dict
 ```json
 {
   "pass": false,
-  "issues": ["回答第 2 步变量值 8 与步骤数据 3 不符", "引用知识库条目不存在"]
+  "issues": [
+    {
+      "claim": "回答第 2 步变量值 8 与步骤数据 3 不符",
+      "answer_span": "第 2 步 arr[1] 变成 8",
+      "fact": "第 2 步: arr[1]=3",
+      "blocking": false
+    }
+  ]
 }
 ```
+
+`answer_span` 必须是候选回答的子串、`fact` 必须是事实依据块的子串，否则该条**机械丢弃**；
+丢弃后无有效意见即判通过。`blocking: true` 表示回答不可用，可豁免修订验收闸的相似度检查。
+（2026-09-14 修订：原为字符串数组，见 `2026-09-14-critic-revise-optimization-design.md` CD-3）
 
 ### 最终回答
 
@@ -138,6 +149,8 @@ decision_trace: dict
 - 意图分类器非法 JSON / 枚举外 / 低置信度 → `other`，trace 记录 `fallback_reason`。
 - 检索失败（pgvector 不可用、embedding 失败）→ 跳过 RAG，trace 标记 `rag: degraded`。
 - 评审失败 → 视为通过，trace 标记 `critic: skipped`。
+- 评审未通过 → 修订；**修订稿须过验收闸**，不过则回退原答，trace 记 `revise_outcome: reverted` + 原因。
+- `critic_mode: advisory` → 评审照跑照记痕迹，但不触发修订（trace 记 `revise_outcome: skipped`）。
 - 修订失败 → 返回原回答，trace 标记 `revise: skipped`。
 - 压缩失败 → 截断注入，trace 标记 `compaction: truncated`。
 
@@ -148,7 +161,8 @@ decision_trace: dict
 - `IntentClassifierTest`：合法/非法 JSON、枚举外、低置信度、中文同义表达。
 - `KnowledgeRetrieverTest`：top-k 排序、阈值过滤、embedding 失败降级。
 - `ContextCompactorTest`：>200 步窗口+摘要+轨迹；≤200 步原样。
-- `CriticNodeTest`：虚构变量值、不存在的引用来源被评出；真实数据通过。
+- `CriticNodeTest`：虚构变量值、不存在的引用来源被评出；真实数据通过；**无出处的意见被丢弃且不触发修订**；
+  **低相似度 / 丢结构化块 / 引入幻觉引用的修订稿被回退原答**。
 - `TraceAssemblerTest`：trace 字段完整。
 - 全流程集成测试：FakeModel 注入，验证四个文本专家均走“生成 → 评审 → 修订 → trace”。
 

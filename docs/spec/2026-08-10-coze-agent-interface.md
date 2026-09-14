@@ -27,6 +27,25 @@
 - `intent` 合法枚举：`data_query`、`concept`、`debug`、`animate`、`animate_guide`、`analyze`、`other`。
 - `steps` 允许为空数组；`compile_error` 允许为空字符串；`user_id` 允许缺失。
 
+**`intent` 的下游影响（2026-09-14 增）**
+
+`intent` 不只用于埋点：它**改变上下文与评审口径**。同一份代码 + 同一个问题，标注不同意图会得到不同的产物。
+
+| 影响面 | `concept`（概念题） | 其它意图（尤其 `data_query`/`debug`） |
+|---|---|---|
+| 系统提示 | 追加以概念讲解为口径的引导段（直接讲概念本身、不围绕当前执行位置） | 追加各自口径的引导段（`data_query` 无额外段） |
+| 上下文 packet | **不注入** `### 当前执行位置`（步骤/行号/变量） | 注入（既有行为） |
+| 契约 | 用 `concept` 意图契约 | 用该意图契约 |
+| 评审口径 | 不得要求「步骤引用/行号」这类本地化证据（概念题没有可引的执行证据） | 按各自口径核对引用 |
+
+**为什么必须分流**：`gather()` 此前对**任何**问题都注入 `### 当前执行位置`（relevance 0.9，全上下文最高），
+主 Agent few-shot 里又**没有一条概念类样本**（7 条中 4 条锚定当前步或优化）⇒ 概念题（「迪杰斯特拉算法的原理是什么？」）
+也被答成「当前这一步在做什么」。分流 + 补样本是这处缺陷的两条修法。
+
+- 注意：本表只描述**智能体侧**如何用 `intent`。后端 / 前端把哪些提问归到哪个 intent，
+  仍在演进（启发式关键词见 coze `intent_rules.py::conservative_intent`，**不保证**与语义完全一致）——
+  故智能体不得把 `intent` 当作绝对真理，只在引导与评审口径上采用它。
+
 ### 1.1 运行模式字段（可选；仅 chat 路径）
 
 前端在 `/api/ai/chat` 的请求里随**每次**提问携带本次运行的模式事实，后端原样透传（下列两键与 §1 的字段同层，
@@ -115,6 +134,11 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
   用户在方案卡上勾选（可多选）后，前端按模板发新一轮提问（白名单「只做…」+ 黑名单「不要顺带做其他方向的改动（例如：…）」），
   第二轮才给 `replace` 的**完整可编译**整份代码——`goal` 单方向时为该方向、**多方向（勾 ≥2）时为 `comprehensive`**（`rationale` 逐项说明），
   且代码只许改动所选方向。
+- **第二步提问以 `【优化第二步】` 起头**，这是智能体判别「这是第二步」的**唯一**依据（不是措辞）。
+  原因：chat 请求无状态、工作记忆只留上一答前 200 字，而 `options` 块在回答末尾 ⇒ 服务端读不到「上一轮已给过卡」；
+  而第二步提问的形状（「只做「以性能为先」方向的优化」）与「用户已指明目标仍先出方案卡」**同形**，无法靠措辞区分。
+  字面量两侧硬编码：前端 `utils/editSuggestion.js::STEP2_MARKER`、coze `prompting/optimization.py::STEP2_MARKER`，
+  各配一条跨仓断言（任何一端改字另一端必须红）。
 - `goal` 闭集与提问模板详见 [2026-09-10-coze-agent-code-optimization.md](./2026-09-10-coze-agent-code-optimization.md) §4.4。
 - `target` 为文件名：多文件模式必填，单文件模式缺省为当前文件。
 - 取值非法 / `code` 为空 / `options` 为空 → 整块按正文展示（不静默丢弃、不崩），前端不出卡。
@@ -131,7 +155,12 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
     {"source": "知识库: Arrays.sort", "score": 0.82}
   ],
   "critic_passed": true,
+  "critic_issues": [
+    {"claim": "变量值 8 与数据不符", "answer_span": "arr[1] 变成了 8", "fact": "学生问题：为什么 arr 变了？", "blocking": true}
+  ],
   "revised": false,
+  "revise_outcome": "skipped",
+  "revise_revert_reason": "",
   "fallback_reason": "",
   "rag_degraded": false,
   "critic_skipped": false,
@@ -153,7 +182,10 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
 | `confidence` | number | LLM 分类置信度，0-1 |
 | `sources` | array | 检索命中的知识来源，未命中为空数组 |
 | `critic_passed` | boolean | 评审是否通过；评审跳过时为 `true` 且 `critic_skipped=true` |
-| `revised` | boolean | 是否执行过修订 |
+| `critic_issues` | array | 评审留下的**有效**意见，元素含 `claim` / `answer_span` / `fact` / `blocking`（文本各截 300 字）。**有效 = 出处可核实**：`answer_span` 须是回答子串、`fact` 须是事实块子串，给不出出处的意见会被丢弃（故本键与「评审据以行动的那份意见」同源）；无意见时 `[]` |
+| `revised` | boolean | **修订稿是否被采纳**（2026-09-14 语义收窄：此前为「是否执行过修订」）。回退时为 `false`——用户拿到的就是原答；要看「是否触发过修订」用 `revise_outcome` |
+| `revise_outcome` | string | `accepted`（采纳）/ `reverted`（过不了验收闸，回退原答）/ `skipped`（未触发 / 调用异常 / advisory 模式） |
+| `revise_revert_reason` | string | 回退原因，未回退时 `""`：`similarity` / `nav_block` / `edit_block` / `grounding` / `recheck` |
 | `fallback_reason` | string | 降级原因，未降级为空字符串 |
 | `rag_degraded` | boolean | 检索降级（跳过 RAG）时为 `true` |
 | `critic_skipped` | boolean | 评审调用失败时为 `true` |

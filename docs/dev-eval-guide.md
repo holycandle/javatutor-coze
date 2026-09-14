@@ -104,6 +104,7 @@ uv run python -c "import json;from pathlib import Path;p=Path('eval/archive/2026
 - `avg_token_usage`：prompt+completion 平均 token。
 - `grounding_verify_applicable` / `checked` / `violations` / `accuracy`：确定性 grounding 核对（不依赖 LLM）。基于本体数据契约规则，程序化验证回答的步骤号/行号/堆对象 id 是否在 steps 数据中真实存在；accuracy = 无违规样本数 / applicable 样本数，仅统计含非空 steps 的样本，可与 Judge 的 `grounding_avg` 交叉对照。
 - `mrr` / `hit_at_1` / `hit_at_3` / `hit_at_5`：RAG 检索四档指标。**`report` 已并入**（2026-09-13 起），与 `tool_call_by_tool` 同层写入 `summary.json` 的 `e2e`。此前这四档只存在于 `retrieval` 子命令、不进 summary，导致「RAG 静默退化」在 `summary.json` 里完全不可见——这是接线而非新增指标，`retrieval` 子命令保留（独立排查用）。
+- `critic_fail_rate`：评审判失败的样本占比；配套的 `critic_agree_with_judge` 见下节「评审与 Judge 的一致性怎么看」。
 - `retrieval_total`：**检索侧的分母**——黄金集中声明 `expected_sources` 的条数。注意它与 `e2e.total`（判分样本数）**同名不同义**，故并入 summary 时改名为 `retrieval_total`；`retrieval` 子命令输出的仍叫 `total`（那是一个独立指标集，无歧义）。
 
 ### 给 `summary.json` 新增扩展指标时（重要陷阱）
@@ -115,6 +116,33 @@ uv run python -c "import json;from pathlib import Path;p=Path('eval/archive/2026
 
 **规则**：并入前显式核对键名冲突；重名的指标在并入点改名（保留函数自身返回形状，别去改它）。
 回归建议：断言 `summary["e2e"]["total"]` 等于判分样本数，同时新指标确实落进了 `e2e`。
+
+### 评审与 Judge 的一致性怎么看（2026-09-14 增）
+
+评审（critic）拦没拦对，只能拿 Judge 的判定当对照物。两个指标进 `summary.json` 的 `e2e`：
+
+- `critic_fail_rate`：被拦样本 / 判分样本（被拦 = `decision_trace.critic_passed is False`）。
+- `critic_agree_with_judge`：`precision` / `recall` / `n`，**两个口径的「正例」定义刻意不同**——
+  - `precision` = 被拦且 Judge 判**非 `correct`** / 被拦。分子含 `partially_correct`（那确实有问题，拦对了）；
+  - `recall` = 被拦且 Judge 判 **`incorrect`** / Judge 判 `incorrect` 的总数。分母只算 `incorrect`
+    （本项目把 `partially_correct` 当「可用」，不算「本该拦」）；
+  - `n` = 被拦数，即 precision 的分母。
+
+两者不可互相推导（正例定义不同），**别用 precision 反推 recall**。逐格分子分母、按意图与按轮次
+拆分都在离线工具里看：
+
+```bash
+uv run python tools/critic_audit.py eval/archive                  # 全部轮次
+uv run python tools/critic_audit.py eval/archive/2026-09-13       # 单轮
+uv run python tools/critic_audit.py eval/archive --json           # 机器可读
+```
+
+该工具**只读归档**（`judged.jsonl`），不发任何请求、不消耗模型额度；聚合实现与 summary 共用
+`eval/runner/critic_agreement.py`，所以工具与报告不会给出两个答案。
+
+判读要点：`precision` 低 = 误杀（Judge 判 `correct` 却被拦），是本子系统的主要故障模式；
+`recall` 低 = 漏拦。归档四轮（截至 round-4）为 precision 22/33 = 66.7%、recall 10/22 = 45.5%，
+即每 3 条被拦里有 1 条是 Judge 眼里的正确答案。
 
 ### 检索
 

@@ -49,9 +49,10 @@ class RouterModel:
     所以必须比 system prompt 而不是比调用序号。
     """
 
-    def __init__(self, main_scripts, critic_pass=True):
+    def __init__(self, main_scripts, critic_pass=True, critic_issues=None):
         self.scripts = list(main_scripts)
         self.critic_pass = critic_pass
+        self.critic_issues = list(critic_issues or [])
         self.main_seen: list[list] = []
 
     def invoke(self, messages):
@@ -64,7 +65,9 @@ class RouterModel:
             return AIMessage(content=nxt)
         if system.startswith(SYSTEM_PROMPT_CRITIC):
             return AIMessage(
-                content=json.dumps({"pass": self.critic_pass, "issues": []}, ensure_ascii=False)
+                content=json.dumps(
+                    {"pass": self.critic_pass, "issues": self.critic_issues}, ensure_ascii=False
+                )
             )
         if system.startswith(SYSTEM_PROMPT_REVISE):
             return AIMessage(content="修订后的回答")
@@ -578,13 +581,26 @@ def test_graph_fetch_failure_is_observation_not_crash():
 
 
 def test_graph_critic_failure_routes_through_revise():
-    """回归：真环接上 critic/revise/verify 之后，修订链仍原样工作。"""
+    """回归：真环接上 critic/revise/verify 之后，修订链仍原样工作。
+
+    评审意见按 CD-3 给足出处（`answer_span` 为原答子串、`fact` 为事实块子串）并标
+    `blocking: true`——后者豁免 CD-1 的相似度闸（原答「原始回答有误」与修订稿
+    「修订后的回答」相似度为 0，没有豁免这条路径必然回退，本用例验的是路由不是闸）。
+    """
     model = RouterModel(
         [
             '{"tool": "step_facts", "args": {"step_index": 1}}',
             "原始回答有误",
         ],
         critic_pass=False,
+        critic_issues=[
+            {
+                "claim": "回答与执行数据不符",
+                "answer_span": "原始回答有误",
+                "fact": "学生问题：x 怎么变了？",
+                "blocking": True,
+            }
+        ],
     )
     compiled = build_flow_graph().compile()
     out = compiled.invoke(

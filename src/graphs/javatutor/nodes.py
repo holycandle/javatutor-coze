@@ -752,6 +752,26 @@ def _build_retrieval(debug: dict | None) -> dict:
     }
 
 
+def _critic_issues(state: JavaTutorState) -> list[dict]:
+    """把 ``critic_feedback``（JSON 字符串）转成 trace 里的 ``critic_issues``。
+
+    复用 ``critic._parse_issues``——痕迹必须与流水线据以行动的那份意见同源，
+    否则「评审到底说了什么」会在两处各长一个样。文本截断到 ``_PREVIEW_CHARS``：
+    痕迹随回答一起发给客户端，逐字带上整段原答会把痕迹撑成回答的几倍大。
+    """
+    from graphs.javatutor.critic import _parse_issues
+
+    return [
+        {
+            "claim": str(item.get("claim", ""))[:_PREVIEW_CHARS],
+            "answer_span": str(item.get("answer_span", ""))[:_PREVIEW_CHARS],
+            "fact": str(item.get("fact", ""))[:_PREVIEW_CHARS],
+            "blocking": bool(item.get("blocking", False)),
+        }
+        for item in _parse_issues(state.get("critic_feedback"))
+    ]
+
+
 def build_final(state: JavaTutorState) -> dict:
     """最终输出节点：拼接回答 + 决策痕迹。
 
@@ -806,7 +826,10 @@ def build_final(state: JavaTutorState) -> dict:
         "reasoning": reasoning,
         "reasoning_truncated": reasoning_truncated,
         "critic_passed": state.get("critic_passed", True),
+        "critic_issues": _critic_issues(state),
         "revised": state.get("revised", False),
+        "revise_outcome": state.get("revise_outcome", "skipped"),
+        "revise_revert_reason": state.get("revise_revert_reason", ""),
         "fallback_reason": state.get("fallback_reason", ""),
         "rag_degraded": state.get("rag_degraded", False),
         "critic_skipped": state.get("critic_skipped", False),
@@ -871,7 +894,7 @@ def build_context_node(state: JavaTutorState) -> dict:
         state,
         history=history,
         memories=state.get("memories") or [],
-        system_instructions=build_system_prompt("other"),
+        system_instructions=build_system_prompt(state.get("intent") or "other"),
     )
     # 下一个节点即 main_agent（首次 LLM 调用），故这里可以用前瞻式的「正在…」。
     out = with_process_events(state, [{"kind": "stage", "text": "正在分析问题…"}])

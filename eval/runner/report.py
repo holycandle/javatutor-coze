@@ -7,6 +7,8 @@ from pathlib import Path
 
 from graphs.javatutor.intent_rules import fact_matches
 
+from .component_metrics import critic_agreement_metrics
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -60,6 +62,8 @@ def summarize(judged: list[dict], component: dict | None = None, extended: dict 
     }
     if extended:
         e2e.update(extended)
+    # 评审 × Judge 一致性（CD-6）：从本轮 judged 直接算，无需读归档——summary 与归档同源。
+    e2e.update(critic_agreement_metrics(judged))
     return {
         "e2e": e2e,
         "component": component or {},
@@ -226,6 +230,7 @@ _E2E_METRIC_ORDER = (
     "grounding_verify_checked",
     "grounding_verify_violations",
     "grounding_verify_accuracy",
+    "critic_fail_rate",
 )
 
 
@@ -308,6 +313,19 @@ def write_report(path, summary, judged, outputs, samples, model="unknown", commi
     for key in _E2E_METRIC_ORDER:
         if key in e2e:
             lines.append(f"| {key} | {e2e[key]} |")
+
+    agree = e2e.get("critic_agree_with_judge") or {}
+    if agree:
+        lines += [
+            "",
+            "## 评审 × Judge 一致性",
+            "",
+            f"- 被拦样本 n={agree.get('n')}（precision / recall 的分母不同，见下）",
+            f"- precision={agree.get('precision')}：被拦且 Judge 判非 `correct` / 被拦",
+            f"- recall={agree.get('recall')}：被拦且 Judge 判 `incorrect` / Judge 判 `incorrect` 总数",
+            "",
+            "逐格分子分母、按意图与按轮次拆分见 `uv run python tools/critic_audit.py eval/archive`。",
+        ]
 
     tool_by_tool = e2e.get("tool_call_by_tool") or {}
     if tool_by_tool:

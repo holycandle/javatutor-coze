@@ -65,3 +65,51 @@ def test_all_sample_rag_labels_are_real_chunks():
                     bad.append(f"{name}:{row.get('id')} -> {src}")
     assert not bad, "以下 expected_sources 不是真实 chunk 标签：\n" + "\n".join(bad)
 
+
+
+# === CD-6：评审 × Judge 一致性指标进 summary ===
+
+
+def _judged_row(id_, judgement, critic_passed, revised=False):
+    return {
+        "id": id_,
+        "judgement": judgement,
+        "score": 3,
+        "decision_trace": {"critic_passed": critic_passed, "revised": revised, "intent": "data_query"},
+    }
+
+
+def test_critic_agreement_metrics_empty_is_zero_shaped():
+    """无归档 / 无样本 ⇒ 返回零值同形状（消费方不必为「没跑」单开分支）。"""
+    from eval.runner.component_metrics import critic_agreement_metrics
+
+    m = critic_agreement_metrics([])
+    assert m["critic_fail_rate"] == 0.0
+    assert m["critic_agree_with_judge"] == {"precision": 0.0, "recall": 0.0, "n": 0}
+
+
+def test_critic_agreement_metrics_counts_full_cross_table():
+    """四格都要对：拦对 / 误杀 / 漏拦 / 正确放过。"""
+    from eval.runner.component_metrics import critic_agreement_metrics
+
+    m = critic_agreement_metrics([
+        _judged_row("a", "incorrect", False, revised=True),   # 拦对
+        _judged_row("b", "partially_correct", False),          # 拦对（非 correct 即算）
+        _judged_row("c", "correct", False),                    # 误杀
+        _judged_row("d", "incorrect", True),                   # 漏拦
+        _judged_row("e", "correct", True),                     # 正确放过
+    ])
+    assert m["critic_fail_rate"] == 0.6                      # 3/5
+    assert m["critic_agree_with_judge"]["precision"] == round(2 / 3, 4)
+    assert m["critic_agree_with_judge"]["recall"] == 0.5     # 拦对的 2 条里只有 1 条是 incorrect
+    assert m["critic_agree_with_judge"]["n"] == 3            # 分母是被拦数
+
+
+def test_summarize_wires_critic_metrics_into_e2e():
+    """红线：指标必须真的落进 summary，而不只是函数算得对。"""
+    from eval.runner.report import summarize
+
+    summary = summarize([_judged_row("a", "incorrect", False, revised=True)])
+    assert summary["e2e"]["critic_fail_rate"] == 1.0
+    assert summary["e2e"]["critic_agree_with_judge"]["precision"] == 1.0
+    assert summary["e2e"]["critic_agree_with_judge"]["n"] == 1

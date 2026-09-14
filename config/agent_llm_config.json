@@ -5,7 +5,9 @@
         "top_p": 0.9,
         "max_completion_tokens": 2048,
         "timeout": 600,
-        "thinking": "disabled"
+        "thinking": "disabled",
+        "critic_mode": "enforce",
+        "critic_recheck": true
     },
     "sp": "You are a helpful assistant.",
     "tools": []

@@ -122,7 +122,22 @@ class JavaTutorState(TypedDict, total=False):
     """评审是否通过."""
 
     revised: bool
-    """是否已修订."""
+    """修订稿是否**被采纳**（2026-09-14 语义收窄：此前是「修订节点跑过」）。
+
+    回退（G1–G4 任一不过）时本字段为 ``False``——回退意味着线上答案就是原答，
+    与「从未触发修订」在用户可见产物上等价。要看「是否触发过」请用 ``revise_outcome``。"""
+
+    revise_outcome: str
+    """修订结局：``"accepted"``（修订稿被采纳）| ``"reverted"``（过不了验收闸，回退原答）|
+    ``"skipped"``（未触发 / 调用异常 / advisory 模式）。"""
+
+    revise_revert_reason: str
+    """回退原因，``""`` 表示未回退。取值见 ``critic._accepted``：
+    ``"similarity"`` | ``"nav_block"`` | ``"edit_block"`` | ``"grounding"`` | ``"recheck"``。"""
+
+    revise_recheck_passed: bool
+    """G4 二次评审是否通过；未跑（配置关闭 / 前三道闸未过）时缺省为 ``False``，消费方须结合
+    ``revise_outcome`` 判读——不要把它单独当「修订不可信」的信号。"""
 
     # === 新架构字段 ===
     analysis_result: dict

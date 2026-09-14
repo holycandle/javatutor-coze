@@ -273,3 +273,61 @@ def test_build_final_redacts_denied_tool_name_from_answer():
     assert "【决策痕迹】" in out["answer"]
     # 结构化 trace 不被改写：剔除只作用于用户可见文本
     assert out["decision_trace"]["reasoning"][0]["content"] == ""
+
+
+# === CD-6 可观测性：评审意见与修订结局进痕迹 ===
+
+
+def test_trace_has_critic_issues_defaults():
+    """缺省：没有评审反馈时 `critic_issues` 是空列表（不是缺键、不是字符串）。"""
+    trace = build_final(_debug_state())["decision_trace"]
+    assert trace["critic_issues"] == []
+    assert trace["revise_outcome"] == "skipped"
+    assert trace["revise_revert_reason"] == ""
+
+
+def test_trace_exposes_validated_critic_issues():
+    """痕迹里的意见必须与流水线实际据以行动的**同一份**（`critic_feedback`）逐字对得上。"""
+    import json
+
+    feedback = json.dumps(
+        [{"claim": "变量值 8 与数据不符", "answer_span": "arr[1] 变成了 8",
+          "fact": "学生问题：为什么 arr 变了？", "blocking": True}],
+        ensure_ascii=False,
+    )
+    out = build_final(_debug_state(critic_passed=False, critic_feedback=feedback))
+    trace = out["decision_trace"]
+    assert trace["critic_issues"][0]["claim"] == "变量值 8 与数据不符"
+    assert trace["critic_issues"][0]["answer_span"] == "arr[1] 变成了 8"
+    assert trace["critic_issues"][0]["blocking"] is True
+    # 端到端产物：痕迹 JSON 是拼进 answer 的，字段必须真的出现在**用户可见文本**里
+    assert '"critic_issues"' in out["answer"]
+    assert "变量值 8 与数据不符" in out["answer"]
+
+
+def test_trace_truncates_long_critic_spans():
+    """痕迹随回答进客户端，逐字带上整段原答会把痕迹撑成回答的几倍大 ⇒ 截断。"""
+    import json
+
+    from graphs.javatutor.nodes import _PREVIEW_CHARS
+
+    long_text = "甲" * (_PREVIEW_CHARS * 3)
+    feedback = json.dumps(
+        [{"claim": long_text, "answer_span": long_text, "fact": long_text}], ensure_ascii=False
+    )
+    issue = build_final(_debug_state(critic_feedback=feedback))["decision_trace"]["critic_issues"][0]
+    assert len(issue["claim"]) == _PREVIEW_CHARS
+    assert len(issue["answer_span"]) == _PREVIEW_CHARS
+
+
+def test_trace_records_revert_reason():
+    state = _debug_state(revised=False, revise_outcome="reverted", revise_revert_reason="similarity")
+    trace = build_final(state)["decision_trace"]
+    assert trace["revise_outcome"] == "reverted"
+    assert trace["revise_revert_reason"] == "similarity"
+
+
+def test_trace_tolerates_bad_critic_feedback():
+    """`critic_feedback` 是 LLM 出的字符串，坏 JSON 不得让 build_final 崩。"""
+    trace = build_final(_debug_state(critic_feedback="{ 不是 JSON"))["decision_trace"]
+    assert trace["critic_issues"] == []

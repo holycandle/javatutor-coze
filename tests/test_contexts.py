@@ -81,6 +81,27 @@ def test_facts_block_empty_without_step_memories():
     assert "已查询的步骤证据" not in facts
 
 
+def test_facts_block_states_intent_for_concept():
+    """事实块增「问题类型」行（CD-4 意图门）：评审据此决定是否要求步骤级引用。"""
+    facts = build_facts_block({**BASE, "intent": "concept"})
+    assert "问题类型" in facts
+    assert "概念讲解" in facts
+
+
+def test_facts_block_omits_intent_line_when_missing():
+    """`intent` 缺失（旧客户端 / 未分类）⇒ 不加行，零行为变化。"""
+    state = {k: v for k, v in BASE.items() if k != "intent"}
+    facts = build_facts_block(state)
+    assert "问题类型" not in facts
+
+
+def test_facts_block_labels_data_query_intent():
+    facts = build_facts_block({**BASE, "intent": "data_query"})
+    assert "问题类型" in facts
+    assert "执行数据" in facts or "数据查询" in facts
+
+
+
 def test_out_of_range_line_is_placeholder():
     ctx = build_other_context({**BASE, "current_line": 999})
     assert "(行号超出范围)" in ctx
