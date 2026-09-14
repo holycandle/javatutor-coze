@@ -319,3 +319,115 @@ propose**，这条消息对后续推理无用；终答本身经 `state["answer"]
   **有意不动**：该区是瞬时的、生成结束即清空，终态折叠区才是留档；
   若将来也要显示，需扩哨兵事件 schema（`kind` 为开放集合，加字段不破协议）。
 
+## 7. 追加：回答正文里出现**裸工具调用 JSON**（2026-09-14 联调反馈②）
+
+**反馈**：截图里用户问了「请整体解说这段代码的算法思路和数据结构。」，回答气泡**下方**直接贴着
+一个带边框的代码块，块内只有两行原始 JSON、**没有任何正文**：
+
+```
+{"tool": "fetch_execution_context", "args": {"file": "Main.java"}}
+{"tool": "step_facts", "args": {"step_index": 0, "line": 10}}
+```
+
+用户原话：「现在仍然是裸 json，不美观，能否把工具调用过程渲染成卡片」。
+
+### 7.1 根因：模型把工具 JSON **裹进了 markdown 围栏**
+
+链路（逐环已验证，非推测）：
+
+1. 模型这一轮的消息实际是 ```` ```json\n{…}\n{…}\n``` ````——**两段工具 JSON 共用一个围栏块**。
+2. `harness/contracts.py::parse_action` 对**整条消息**做 `json.loads`。首字符是 `` ` `` 不是 `{`，
+   解析失败 → 返回 `None` → 该轮被判定为**终态回答**，不是工具提案。
+   **后果比渲染问题严重**：这一轮的工具**根本没被执行**（若发生在第一轮，回答会缺证据）。
+3. 终态走 `_strip_leaked_json` 清洗，但规则 0（`startswith("{")`）要求首字符是 `{`、
+   规则 4（`\s*$` 前是 `}`）被收尾围栏挡住——**两条都够不到围栏块**。
+4. 于是这段围栏 JSON 作为 `answer` 正文落库、进 `【决策痕迹】` 之前的正文段，
+   在前端被 markdown 渲染成 `.chat-bubble.assistant` 里的一个 `<pre>`
+   （`background: var(--code-bg)` + `1px solid var(--border)`）——与截图**逐像素一致**，
+   也解释了为什么**没有正文**（模型这一轮只吐了 JSON）。
+
+对照取证：同内容的**裸写**变体（开头裸 JSON / 散文+裸 JSON / 一条消息两段裸 JSON）
+本来就已被剥掉（规则 0/1/4）；**只有裹围栏这一种形态能复现截图**，围栏是必要条件。
+
+### 7.2 改了什么
+
+**(a) coze 侧：`_strip_leaked_json` 穿围栏剥离（`src/graphs/javatutor/nodes.py`）**
+
+新增 `_strip_leading_tool_fence` / `_strip_trailing_tool_fence`（配合
+`_fence_body_is_only_tool_json` 与 `_fence_span`），挂在原有规则 0（首）与规则 4（尾）之后，
+编号 **0b / 4b**。判据与裸写路径**逐字相同**：用 `json.JSONDecoder().raw_decode` 逐段消费，
+**每个对象都必须有 `tool` 键**才算工具块。
+
+- **只剥「整块仅由工具 JSON 组成」的围栏**：正文里的 ```java 代码块、
+  或围栏里混了非 JSON 文本的一律**原样保留**（用例 `test_keeps_fenced_code_that_is_not_a_tool_call`
+  与 `test_keeps_fence_that_mixes_tool_json_with_other_text` 钉死）。
+- 首/尾对称：与规则 0/4 对裸写 JSON 的口径一致（开头剥、结尾剥，中间的不动）。
+
+**(b) 提示词：从上游掐掉这条路径（`prompts.py`，第 143 行）**
+
+```
+工具调用 JSON 必须**裸写**、独占一条消息：不要用 markdown 代码块（三反引号围栏）包裹，
+一条消息里只写一个工具调用；不得与回答正文写在同一段里；回答正文中不得出现工具调用 JSON。
+（裹进代码块或一条消息写两个的，系统都读不出这是工具调用，只会当成你的最终回答原样展示给用户。）
+```
+
+剥离只是**兜底**——真正的危害是「工具没被调用」。所以约束写在 `SYSTEM_PROMPT_MAIN_AGENT` 里，
+并**明说后果**（模型不知道 `parse_action` 的解析口径，只说「不许」容易失效）。
+`tests/test_prompting.py::test_main_agent_prompt_forbids_inline_tool_json` 同步**加强**
+（原断言 `工具调用 JSON 必须独占一条消息` 改为同时钉住「裸写」「不要用 markdown 代码块
+（三反引号围栏）包裹」「一条消息里只写一个工具调用」四条）。
+
+**(c) 前端：【执行过程】的工具行 → 卡片（用户明确要的形态）**
+
+`decisionTrace.js` 把 `formatToolCall`（返回一行字符串）换成 `toolCard`（返回
+`{tool, label, argsText, resultText, status}`），`traceSummary` 的
+`toolLines` → `toolCards`；`DecisionTracePanel.vue` 改为渲染
+`状态点 + 工具名 + 标量参数`（标题行）/ `result 摘要`（结果行），
+左侧 2px 色条按 `status` 标色（成功 `--primary`，失败 `--danger`）。
+
+```
+[·] 获取执行上下文              ← 标题行（工具名可读化：TOOL_LABELS）
+    Main.java（主入口），3160 字 ← 结果行（从 result 读，不看 args）
+[·] 查询单步证据  查询第 2 步，行 5
+    已获取证据
+[·] 查询单步证据  查询第 7 步，行 0
+    越界（共 6 步）              ← status=error，左侧色条转红
+```
+
+未知工具名**直接用原名**（`TOOL_LABELS[tool] || tool`）——将来加工具不改前端也有可读标题。
+逐字段口径与 §6 的 fetch 渲染**一字不差**（`file`/`file_source`/`code_chars` 仍从 `result` 读），
+只是从「一行纯文本」换成三段字段。
+
+### 7.3 **明确没做**：前端不加围栏剥离（有证据，不是漏做）
+
+曾计划给前端 `stripLeadingToolJson` 加一套穿围栏的首尾剥离，**取证后撤掉**：
+
+- 实测客户端 delta 流里，围栏形态的那一轮**根本不会出现**——它被判为**终态**，
+  而终态轮**不流式**（§ 上一批修复的 Task 5：`propose` 只流中间提案轮），
+  前端只会收到 `build_final` 清洗后的 `answer`。
+- 客户端 delta dump 的实测结果：围栏形态下流里**只有哨兵 + `\n\n【决策痕迹】…`**，
+  **一个反引号都没有**。
+- 结论：coze 侧这一处剥离**已经**修好用户可见正文，前端再写一套就是**投机代码**
+  （无输入可触发它，只能靠单测自证存在）。故不写。
+
+### 7.4 验证
+
+- coze：`uv run pytest tests/ -q` → **431 passed**（基线 424 + 7 条围栏用例）。
+  其中 `test_end_to_end_fenced_tool_json_never_reaches_answer_body` 是**端到端红线用例**：
+  走真实图 + 脚本化模型（喂围栏形态），断言 `answer` 正文里
+  **不含 `"tool"`、不含 `fetch_execution_context`、不含 ``` ``` ```**，且正文与
+  `【决策痕迹】` 块仍在——按红线纪律取证到**端到端产物**，不停在 `_strip_leaked_json` 的返回值层。
+- 前端：`npx vitest run` → **444 passed / 33 files**（用例原地改写，总数不变）。
+- `npm run build` ok；L5 外壳回归两条命令**均无输出**（外壳未动）。
+- **线上未验证**：需 coze 侧重发提示词与 `nodes.py` 后才生效；重发后仍需按计划 §4 跑一次
+  小样本评估（本组对话只做本地门槛，不做发布与评估）。
+
+### 7.5 `PROMPT_VERSION` **未递增**（有意）
+
+`prompting/versions.py` 的注释写着「修改任何提示词组件时必须递增此版本」，但
+`git log` 显示该文件**从未**因提示词改动而更新过（唯一一次提交），
+且 `tests/test_prompting.py::test_prompt_version_defined` 钉死 `startswith("2026-08-13")`。
+本次**遵循仓库既有实践**（`af8d2d2` 改 `prompts.py` 同样没递增），只在报告里记一笔：
+**版本号与提示词内容已脱钩，需要单独一个决定要不要恢复这条约束**——
+真要恢复，应同时改 `versions.py` 与那条断言。
+

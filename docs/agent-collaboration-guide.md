@@ -65,10 +65,12 @@ flowchart TD
 > 模型却多轮说没有源码」的成因。详见
 > `docs/spec/2026-08-23-execution-context-fetch-design.md` §5.6。
 >
-> 前端【执行过程】区据此把 fetch 行渲染成
-> `调用 fetch_execution_context → Main.java（主入口），1234 字`（失败为 `→ 失败：<错误>`）。
+> 前端【执行过程】区据此把 fetch 调用渲染成**卡片**：标题行 `获取执行上下文`，
+> 结果行 `Main.java（主入口），1234 字`（失败为 `失败：<错误>` 且标红）。
 > **只看模型传的 `args` 是不够的**：自动前置的那次 fetch（`args` 为空）与模型不传 `file`
 > 的调用都没有文件名，此前只能显示一行 `调用 fetch_execution_context`。
+> 2026-09-14 起 `tool_calls` 的每条调用都是一张卡片（见 devlog
+> `2026-09-14-fix-fetch-context-and-duplicate-answer.md` §6–§7）。
 
 明确**不做**的事（避免将来重复论证）：
 

@@ -8,13 +8,17 @@ from graphs.javatutor.prompts import SYSTEM_PROMPT_MAIN_AGENT
 
 
 def test_main_agent_prompt_forbids_inline_tool_json():
-    """主 Agent 提示词必须明令工具 JSON 独占一条消息。
+    """主 Agent 提示词必须明令工具 JSON **裸写**、独占一条消息、一条消息只写一个。
 
-    这是 ``_strip_leaked_json`` 规则 0 的**上游**约束（规则 0 只是兜底）：模型走
-    「工具 JSON + 散文」这条路时 ``parse_action`` 返回 ``None``，那一轮的工具
-    **根本没有被调用**——若发生在第一轮，回答会缺证据，比渲染问题更严重。
+    这是 ``_strip_leaked_json`` 规则 0/0b 的**上游**约束（剥离只是兜底）：模型走
+    「工具 JSON + 散文」「裹进代码块」「一条消息两个 JSON」这三条路时 ``parse_action``
+    都返回 ``None``，那一轮的工具**根本没有被调用**——若发生在第一轮，回答会缺证据，
+    比渲染问题更严重。2026-09-14 联调实测：模型把两段工具 JSON 裹进一个 ```json 块交出，
+    既没调工具，代码块又被当正文展示（用户报告「仍然是裸 json」）。
     """
-    assert "工具调用 JSON 必须独占一条消息" in SYSTEM_PROMPT_MAIN_AGENT
+    assert "工具调用 JSON 必须**裸写**、独占一条消息" in SYSTEM_PROMPT_MAIN_AGENT
+    assert "不要用 markdown 代码块（三反引号围栏）包裹" in SYSTEM_PROMPT_MAIN_AGENT
+    assert "一条消息里只写一个工具调用" in SYSTEM_PROMPT_MAIN_AGENT
     assert "回答正文中不得出现工具调用 JSON" in SYSTEM_PROMPT_MAIN_AGENT
 
 

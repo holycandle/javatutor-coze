@@ -140,7 +140,8 @@ step_facts 的 step_index 是 0-based：第 1 步 = step_index 0，第 N 步 = s
 
 第 3 轮，基于源码与证据直接回答，引用真实行号与变量值，不再重复查询。
 
-工具调用 JSON 必须独占一条消息，不得与回答正文写在同一段里；回答正文中不得出现工具调用 JSON。"""
+工具调用 JSON 必须**裸写**、独占一条消息：不要用 markdown 代码块（三反引号围栏）包裹，一条消息里只写一个工具调用；不得与回答正文写在同一段里；回答正文中不得出现工具调用 JSON。
+（裹进代码块或一条消息写两个的，系统都读不出这是工具调用，只会当成你的最终回答原样展示给用户。）"""
 
 from graphs.javatutor.prompting.contracts import get_contract
 from graphs.javatutor.prompting.glossary import build_glossary_block

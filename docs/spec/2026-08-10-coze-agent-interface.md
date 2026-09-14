@@ -170,11 +170,15 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
 > 同时**取消「成功但空」**：解析不到源码（含切行后为空）一律返回
 > `fetch_context_failed=true` + 带候选文件名的 `error`，不再出现
 > `fetch_context_failed=false` 配 `code=""` 的静默成功。
-> 前端【执行过程】区把这两个字段渲染进 fetch 行
-> （`调用 fetch_execution_context → Main.java（主入口），1234 字`；失败为 `→ 失败：<错误>`，
-> 长错误截 60 字）。**不能只看 `args`**：自动前置的 fetch（`args` 为空）与模型不传 `file`
-> 的调用都没有文件名。
+> 前端【执行过程】区把这两个字段渲染进 fetch 卡片
+> （标题行 `获取执行上下文`；结果行 `Main.java（主入口），1234 字`，失败为 `失败：<错误>`
+> 并标红，长错误截 60 字）。**不能只看 `args`**：自动前置的 fetch（`args` 为空）与模型不传
+> `file` 的调用都没有文件名。
 > 详见 `2026-08-23-execution-context-fetch-design.md`。
+
+> **2026-09-14（联调反馈②）**：`tool_calls` 每次调用在【执行过程】区渲染成**一张卡片**
+> （工具名 + 标量参数一行、`result` 摘要一行、左侧色条按成功/失败标色），不再是一行裸文本。
+> 逐字段口径见 `docs/devlog/2026-09-14-fix-fetch-context-and-duplicate-answer.md` §6–§7。
 
 ## 4. 正文引用格式
 

@@ -439,11 +439,85 @@ def _strip_leading_tool_json(text: str) -> str:
     return ("\n\n" + rest) if rest and not rest.startswith("\n") else rest
 
 
+# ── 工具调用块的第二种写法：markdown 围栏 ──────────────────────────────────────
+#
+# 2026-09-14 联调实测：模型照 ``_MARKDOWN_RULES`` 教的代码块习惯，把工具调用 JSON 裹进
+# ```json 围栏里当回答交出，正文顶端于是原样出现一个两行 JSON 的代码块（前端截图形态）。
+# 裸写那套（``_strip_leading_tool_json`` 要求首字符是 ``{``；规则 4 要求 ``}`` 直接贴 ``$``）
+# **一条都够不到**，前端 ``stripLeadingToolJson`` 同样只认裸写 → 裸 JSON 进了用户可见产物。
+# 判据与裸写同口径：**对象且有 ``tool`` 键**；且要求围栏体**只**由这类 JSON 组成，
+# 免得把正文里任一 ``` 代码块误伤。
+
+_TOOL_FENCE_OPEN = re.compile(r"[ \t]*```[A-Za-z0-9_+-]*[ \t]*$", re.MULTILINE)
+
+
+def _fence_body_is_only_tool_json(body: str) -> bool:
+    """围栏体必须**只**由工具调用 JSON 组成（多一个字都不剥——正文代码块不得误伤）。"""
+    decoder = json.JSONDecoder()
+    rest = body.strip()
+    if not rest:
+        return False
+    while rest:
+        try:
+            obj, end = decoder.raw_decode(rest)
+        except ValueError:
+            return False
+        if not (isinstance(obj, dict) and obj.get("tool")):
+            return False
+        rest = rest[end:].strip()
+    return True
+
+
+def _fence_span(s: str, start: int) -> tuple[int, int, str] | None:
+    """``s[start:]`` 处若是围栏块，返回 ``(行首, 收尾围栏行末, 体)``；不是则 ``None``。
+
+    ``start`` 必须是行首（调用方负责）；收尾围栏行末**不含**它自己的换行。
+    """
+    open_m = _TOOL_FENCE_OPEN.match(s, start)
+    if not open_m:
+        return None
+    body_start = open_m.end() + 1  # 开栏行末的 \n 之后
+    pos = body_start
+    while pos <= len(s):
+        line_end = s.find("\n", pos)
+        stop = len(s) if line_end == -1 else line_end
+        if s[pos:stop].strip() == "```":
+            return open_m.start(), stop, s[body_start:pos]
+        if line_end == -1:
+            return None
+        pos = line_end + 1
+    return None
+
+
+def _strip_leading_tool_fence(text: str) -> str:
+    """剥掉**开头**只装工具调用 JSON 的围栏块。"""
+    s = text.lstrip()
+    span = _fence_span(s, 0)
+    if span and _fence_body_is_only_tool_json(span[2]):
+        return s[span[1]:].lstrip("\n")
+    return text
+
+
+def _strip_trailing_tool_fence(text: str) -> str:
+    """剥掉**结尾**只装工具调用 JSON 的围栏块（与规则 4 对裸写的口径对称）。"""
+    s = text.rstrip()
+    pos = 0
+    while True:
+        nl = s.find("\n", pos)
+        if nl == -1:
+            return text
+        span = _fence_span(s, nl + 1)
+        if span and span[1] == len(s) and _fence_body_is_only_tool_json(span[2]):
+            return s[:nl].rstrip()
+        pos = nl + 1
+
+
 def _strip_leaked_json(text: str) -> str:
     """移除回答正文中泄露的意图/评审/工具 JSON 片段。
 
     目标模式（按规则顺序）：
     - 开头的 {"tool":...}（模型把工具提案与正文连写；用平衡解析，见 ``_strip_leading_tool_json``）
+    - 开头/结尾的围栏工具调用块（```` ```json ```` … ```` ``` ````，见 ``_strip_leading_tool_fence``）
     - 开头的 {"intent":...,"confidence":...}
     - 任意位置的 {"pass":...,"issues":[...]}
     - 结尾的 {"tool":...}
@@ -457,6 +531,8 @@ def _strip_leaked_json(text: str) -> str:
     # 0. 移除开头的工具调用 JSON（模型可能把提案与正文连写：
     #    {"tool": "fetch_execution_context", "args": {"file": "Main.java"}}### 标题）
     text = _strip_leading_tool_json(text)
+    # 0b. 同一条 JSON 裹在 ``` 里时上面那条够不到（首字符不是 `{`）——2026-09-14 实测形态。
+    text = _strip_leading_tool_fence(text)
 
     # 1. 移除开头的意图 JSON（可能被 markdown 代码块包裹）
     text = _re.sub(
@@ -470,6 +546,7 @@ def _strip_leaked_json(text: str) -> str:
     #     规则 4 靠 `$` 锚定只管结尾，缺了这一步 `{"intent":...}\n\n{"tool":...}\n\n正文`
     #     里的工具 JSON 会漏网（两条规则叠加的输入见 tests/test_nodes.py）。
     text = _strip_leading_tool_json(text)
+    text = _strip_leading_tool_fence(text)
 
     # 2. 移除任意位置的评审 JSON
     text = _re.sub(
@@ -483,6 +560,8 @@ def _strip_leaked_json(text: str) -> str:
     text = _re.sub(r'\n{3,}', '\n\n', text).strip()
     # 4. 移除结尾的工具调用 JSON（模型未执行工具时可能直接输出）
     text = _re.sub(r'\n*\s*\{\s*"tool"\s*:.*?\}\s*$', '', text, flags=_re.DOTALL)
+    # 4b. 结尾的工具调用 JSON 裹在 ``` 里时，规则 4 的 `\s*$` 被收尾围栏挡掉 → 够不到。
+    text = _strip_trailing_tool_fence(text)
     return text
 
 

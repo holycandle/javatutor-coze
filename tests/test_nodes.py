@@ -61,6 +61,47 @@ def test_strips_leading_tool_json_with_leading_whitespace():
     assert "正文" in out
 
 
+# ── 规则 0b/4b：同一段 JSON 裹在 ``` 围栏里（2026-09-14 联调实测形态）──────────
+#
+# 模型照 ``_MARKDOWN_RULES`` 教的代码块习惯，把工具调用 JSON 裹进 ```json 当回答交出。
+# 裸写那套够不到：规则 0 要求首字符是 ``{``（围栏首字符是反引号），规则 4 要求 ``}`` 后面
+# 只剩空白再贴 ``$``（收尾围栏把 ``\s*$`` 挡掉）。正文顶端于是原样出现一个两行 JSON 的
+# 代码块——用户截图形态。判据与裸写同口径：**对象且有 ``tool`` 键**。
+
+_TOOL_FETCH = '{"tool": "fetch_execution_context", "args": {"file": "Main.java"}}'
+_TOOL_STEP = '{"tool": "step_facts", "args": {"step_index": 0, "line": 10}}'
+_FENCED = f"```json\n{_TOOL_FETCH}\n{_TOOL_STEP}\n```"
+
+
+def test_strips_leading_fenced_tool_json_matching_the_reported_shape():
+    """联调截图：正文顶端一个只装两行工具 JSON 的代码块，剥完正文为空。"""
+    assert _strip_leaked_json(_FENCED) == ""
+
+
+def test_strips_leading_fenced_tool_json_before_prose():
+    assert _strip_leaked_json(f"{_FENCED}\n\n正文") == "正文"
+
+
+def test_strips_trailing_fenced_tool_json():
+    assert _strip_leaked_json(f"### 正文\n\n{_FENCED}") == "### 正文"
+
+
+def test_strips_fence_without_language_tag():
+    assert _strip_leaked_json(f"```\n{_TOOL_FETCH}\n```\n正文") == "正文"
+
+
+def test_keeps_fenced_code_that_is_not_a_tool_call():
+    """正文代码块不得误伤——判据仍然是「对象且有 ``tool`` 键」，不是「有围栏就剥」。"""
+    text = "```java\nint x = 1;\n```\n正文"
+    assert _strip_leaked_json(text) == text
+
+
+def test_keeps_fence_that_mixes_tool_json_with_other_text():
+    """围栏体混了别的行 → 整块按正文保留（宁可留着，不可误删用户要的代码块）。"""
+    text = f"```json\n{_TOOL_FETCH}\n不是 JSON\n```\n正文"
+    assert _strip_leaked_json(text) == text
+
+
 def test_intent_then_tool_json_both_stripped():
     """两条规则叠加：规则 1 剥掉开头的意图 JSON 后，又暴露出开头的工具 JSON。
 
@@ -147,4 +188,37 @@ def test_end_to_end_glued_tool_json_never_reaches_answer_body():
     assert "fetch_execution_context" not in body
     assert "### 当前这一步的执行内容" in body
     # 【决策痕迹】段仍在，未被清洗规则误伤
+    assert "【决策痕迹】" in out["answer"]
+
+
+def test_end_to_end_fenced_tool_json_never_reaches_answer_body():
+    """完整图跑一次：终答里**裹在 ``` 围栏内**的工具 JSON 同样不得进用户可见正文。
+
+    裸写那条由 ``test_end_to_end_glued_tool_json_never_reaches_answer_body`` 守着；
+    本用例守围栏那条。**必须在端到端产物上下结论**：前端 ``stripLeadingToolJson`` 只认裸写
+    （首字符必须是 ``{``），所以这条通路没有任何下游兜底，只有 ``build_final`` 一道。
+    """
+    model = _GluedToolJsonModel(
+        [
+            '{"tool": "step_facts", "args": {"step_index": 1}}',
+            f"{_FENCED}\n\n### 当前这一步的执行内容\n\n正文内容",
+        ]
+    )
+    payload = {
+        "source_code": "public class A { void f() { int x = 1; } }",
+        "steps": STEPS,
+        "current_step_index": 1,
+        "current_line": 4,
+        "user_question": "x 怎么变了？",
+    }
+    out = build_flow_graph().compile().invoke(
+        {"messages": [HumanMessage(content=json.dumps(payload, ensure_ascii=False))]},
+        config={"configurable": {"chat_model": model}},
+    )
+
+    body = _body(out["answer"])
+    assert '"tool"' not in body
+    assert "fetch_execution_context" not in body
+    assert "```" not in body, f"围栏残留：{body[:60]!r}"
+    assert "### 当前这一步的执行内容" in body
     assert "【决策痕迹】" in out["answer"]
