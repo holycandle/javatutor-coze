@@ -14,7 +14,9 @@ flowchart TD
     E --> F[retrieve_knowledge<br/>RAG 检索相关知识点]
     F --> G[build_context<br/>把提示、RAG、记忆组装成上下文]
     G --> H[main_agent<br/>提案：产出工具提案 或 终答]
-    H -->|answer 非空| I[critic<br/>核查步骤号、行号、变量、堆 id、输出]
+    H -->|answer 非空| P[answer_gate<br/>终答形态门闩：第二步必须交付 replace]
+    P -->|pass / violated| I[critic<br/>核查步骤号、行号、变量、堆 id、输出]
+    P -->|retry：终答形态不合规| H
     H -->|action| M[guard<br/>治理门闩：allow / deny / needs_decision<br/>唯一的 HITL 暂停点]
     M -->|allow / P4-resolved| N[run_tools<br/>执行 + 结构化观察]
     M -->|deny| H
@@ -39,6 +41,7 @@ flowchart TD
 | 门闩 | `guard` | 纯函数 `decide()` 裁决：白名单（P1）、参数结构（P2）、轮次预算（P3）、文件名歧义（P4）、重复步骤（P5）。allow 才放行；P4 是唯一的暂停点——HITL 开则中断等用户选文件名（`P4-resolved`，补全原提案后放行），关则降级为 deny。P4 的判据是「按 `match_file_key`（与 fetch 工具同源）**匹配不到**」，与项目有几个文件无关——单文件项目里写错文件名同样需要人来选，不会漏到工具层去吃硬错误 |
 | 执行 | `run_tools` | 只执行已放行的提案；查单步证据前自动前置一次 `fetch_execution_context`（不占轮次） |
 | 观察 | `run_tools` / `guard` | 同一份结果两种形态：渲染文本回灌给模型（`agent_messages`），结构化 `Observation` 记进 `step_records` |
+| 终答形态门闩 | `answer_gate` | 纯函数判据：提问以 `【优化第二步】` 起头时，终答必须恰好一个 `kind:"replace"` 的【编辑建议】块、`code` 非空无 `...` 占位。不合规就**拒绝该终答**（清空 `answer`、回灌一条 `HumanMessage` 观察）并回 `main_agent` 重提案——**与 `guard` 共享同一次轮次预算**，用尽则记 `violated` 按收束策略交付。痕迹两键 `optimize_step2_gate` / `optimize_step2_retries`。判据只认**形态**（不像评审那样看语义），见 `docs/spec/2026-09-11-agent-harness-react-loop-design.md` §4.9 |
 
 被拒的提案**不会**进 `tool_calls`（那是「实际执行的调用」记录），但拒绝原因一定回灌给模型，
 否则下一轮只会重复同一个错。
@@ -53,6 +56,7 @@ flowchart TD
 | 整体代码（执行上下文） | **工具（按需）**：主 Agent 按需调 `fetch_execution_context` | 量大、随请求变化；读到后先暂存 state，是否展示由 agent / 上下文工程决定，不强制注入 |
 | 单步执行证据 | **工具（JIT）**：主 Agent 按需调 `step_facts` | 量大、随问题变化，按需取 |
 | 治理决策（放行 / 拒绝 / 需要用户选择） | **门闩层（纯函数裁决）**：`harness/guard.py::decide` | 必须是可测的确定性规则，不能靠提示词祈愿；裁决结果与理由走 `guard_decision` / `step_records` |
+| 交付形态（第二步是否真的给了整份代码） | **门闩层（纯函数判据）**：`harness/answer_gate.py::check_step2_answer` | 同上一条同一个理由——线上实测提示词条款会被偶发违背（10 次 1 次）；判据只认形态，不合规就打回重提案，结果走 `answer_gate_decision` |
 
 > **`fetch_execution_context` 的回包自描述（2026-09-14）**：入口解析按
 > `file` → `entry_file` → `current_step_file` → 唯一文件 → `source_code` 依次兜底，
@@ -88,6 +92,7 @@ flowchart TD
 | `retrieve_knowledge` | RAG 检索与问题相关的知识点，产出 `retrieved_chunks`；同时发一条 stage 哨兵 | 确定性 |
 | `build_context` | 把系统提示、RAG 片段、记忆拼成一份上下文（不再无条件注入整段代码）；同时发一条 stage 哨兵 | 规则 |
 | `main_agent` | 提一轮提案：要么给终答，要么给工具提案；轮次用尽后进入收束轮（只给终答） | LLM |
+| `answer_gate` | 终答形态门闩：第二步提问（`【优化第二步】`）的终答必须是合规的 `kind:"replace"` 整份代码，否则打回重提案（与 `guard` 共享轮次预算） | 纯函数 |
 | `guard` | 治理门闩：白名单 / 参数结构 / 轮次预算 / 文件名歧义 / 重复步骤；唯一的 HITL 暂停点 | 纯函数 |
 | `run_tools` | 执行已放行的提案，产出 Observation（渲染文本给模型 + 结构化记录给系统）；每个 Observation 发一条 tool 哨兵，末尾再发一条收尾 stage | 纯函数 |
 | `critic` | 事实核查五类数字和值，防止编造 | LLM |
@@ -192,6 +197,12 @@ id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，
 
   `rag_degraded` 语义不变：**仅在后端失败时为 `true`**；「检索成功但 0 条越阈值」不置位（那是「无匹配」而非「故障」，混同会让诊断信号失真）。
 
+  决策痕迹的**交付形态两键**（2026-09-14 新增，纯增量）：
+
+  - `optimize_step2_gate`：`passed`（终答是合规的 `kind:"replace"` 整份代码）/ `violated`（轮次用尽仍未交付）/
+    `not_applicable`（本条提问不是第二步）。`violated` 是**唯一**表示「用户拿到的不是整份代码」的取值。
+  - `optimize_step2_retries`：门闩把终答打回重提案的次数，一次过为 `0`。与 `tool_rounds` 共享预算，恒 `<= 3`。
+
   决策痕迹的**评审三键**（2026-09-14 新增，纯增量）：
 
   - `critic_issues`：评审留下的**有效**意见（`claim` / `answer_span` / `fact` / `blocking`，文本各截 300 字）。
@@ -214,6 +225,9 @@ id 形如 `jt-proc-{request_started_at}-{seq}`：同请求内靠 `seq` 唯一，
 - `agent_messages`：主 Agent 循环的**累积**消息序列（System / Human / AI / Human…）。与 `messages` 分开——后者是入站契约（`parse_context` 读其最后一条，平台 `stream_mode="messages"` 与它耦合），不能被循环过程污染。
 - `proposed_action`：本轮的提案（`tool` / `args` / `raw`，或 `parse_error`），存 dict 以便进 checkpointer。
 - `guard_decision`：最近一次门闩裁决（`verdict` / `policy` / `reason` / `options`）。
+- `answer_gate_decision`：最近一次终答形态门闩裁决（`verdict` / `reason` / `retries`）。
+  `verdict` 取 `passed` / `violated` / `not_applicable`，以及**瞬态**的 `retry`（回提案节点重出终答，
+  终态不会停在它上面）。痕迹里的 `optimize_step2_gate` / `optimize_step2_retries` 由本字段派生。
 - `step_records`：逐动作的 Observation 记录，供决策痕迹、评测与 B 端可观测。
 - `served_step_indices`：本请求内已成功查询过的 `step_index`（0-based），供门闩 P5 判重复。
 - `fetched_injected`：本请求是否已把执行上下文读进 state（自动前置 fetch 或模型显式 fetch 都会置位）。

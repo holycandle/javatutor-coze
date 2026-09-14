@@ -803,6 +803,7 @@ def build_final(state: JavaTutorState) -> dict:
     reasoning, reasoning_truncated = build_reasoning(
         state.get("agent_messages") or [], executed_tools=executed_tools
     )
+    _answer_gate = state.get("answer_gate_decision") or {}
 
     trace = {
         "run_id": run_id,
@@ -838,6 +839,8 @@ def build_final(state: JavaTutorState) -> dict:
         "tool_calls": tool_calls,
         "token_usage": _estimate_token_usage(state),
         "verification": state.get("verification") or {},
+        "optimize_step2_gate": _answer_gate.get("verdict") or "not_applicable",
+        "optimize_step2_retries": int(_answer_gate.get("retries", 0) or 0),
     }
     trace_json = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))
     # 终局红线兜底：被拒工具名（step_records 里 status != "ok" 的权威记录）不得出现在

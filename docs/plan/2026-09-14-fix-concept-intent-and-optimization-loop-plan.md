@@ -157,7 +157,7 @@ uv run python tools/probe_concept_and_optimization.py --out probe.json   # 真�
 | **D3** | **概念题不注入 `### 当前执行位置`**（`gather()` 按 intent 门控）；`### 项目结构` 保留 | 根因 2。该块是症状的直接锚点；概念题可从代码 + 知识作答，不需要「第几步/第几行」。保留项目结构是为了让 `file` 参数可定位 |
 | **D4** | **`build_context_node` 的 `system_instructions` 由硬编码 `"other"` 改为按 intent** | 根因 1 的同一处。恢复按意图的输出契约（如 `CONTRACTS["concept"]` 的「先给核心定义…禁止脱离本次代码空谈教材内容」）。用 `build_system_prompt(intent)` 而非只取契约，以免丢掉其携带的**领域词汇/领域本体**块 |
 | **D5** | **评审加意图门**：事实块增「问题类型」行；concept 题**不得**因未引用步骤数据/代码行而判失败 | 根因 3。直接对应「此类回答往往评审未通过而被修订」。**⇒ 已被 `docs/spec/2026-09-14-critic-revise-optimization-design.md` CD-4 取代，本计划的 Task 5 不再单独执行** |
-| **D6** | **评审在「带第二步标记」时获得否决权**：把现「不得因 `kind` 判失败」收窄为「非第二步不得因 `kind` 判失败」；带标记却给 `options`/空 `code` ⇒ 判失败 | 加重 2。给两步式补第二道防线。**⇒ 已收编进同一 spec 的 CD-4 第 4 条，本计划的 Task 8 不再单独执行**（同一段提示词不得并行改） |
+| **D6** | **评审在「带第二步标记」时获得否决权**：把现「不得因 `kind` 判失败」收窄为「非第二步不得因 `kind` 判失败」；带标记却给 `options`/空 `code` ⇒ 判失败 | 加重 2。给两步式补第二道防线。**⇒ 已收编进同一 spec 的 CD-4 第 4 条，本计划的 Task 8 不再单独执行**（同一段提示词不得并行改）。**⇒ 2026-09-14 复审追加：该否决权是提示词条款，实测仍会偶发失效**（同一字面提问 10 次里 1 次回落成方案卡），故由确定性门闩兜底，见 `docs/plan/2026-09-14-optimization-step2-delivery-gate-plan.md` |
 | **D7** | `conservative_intent` 的「第」改为要求 `第 N 步/行` 形状 | 误判污染痕迹与检索指标；golden 样本零暴露，改动安全 |
 
 **明确不做**（避免将来重复论证）：
@@ -347,9 +347,13 @@ uv run python tools/probe_concept_and_optimization.py --out probe.json   # 真�
 2. **概念题不再被评审误杀**：`intent=concept` 时 `critic_passed` 不再因「未引用步骤数据」为 `false`
    （D5；实测 1 的 `false/true` 形状应消失）。
 3. **优化第二步必给代码**：带 `【优化第二步】` 标记的提问，回答含 `kind:"replace"` 且 `code` 为完整文件全文，
-   **不出现** `kind:"options"`；连续两次提交同一卡片仍稳定给代码（D1 + D6）。
+   **不出现** `kind:"options"`。**判据（2026-09-14 复审修正）**：单次通过不构成证据——同一字面提问**连续 10 次**全部交付 `replace`
+   （线上实测基线为 10 次里 1 次回落），且 `decision_trace.optimize_step2_gate` 全部为 `passed` 或 `violated`
+   而**不为**「门闩不存在」。离线侧由 `tests/test_answer_gate.py` 的失败回灌用例兜住（D1 + 确定性门闩）。
 4. **无标记时行为不变**：「帮我优化一下这段代码」/「优化性能」仍出方案卡（D1 的兼容边界）。
-5. **第二道防线生效**：带标记却给 `options`/空 `code` ⇒ 评审判失败（D6）。
+5. **第二道防线生效**：带标记却给 `options`/空 `code` ⇒ 终答被**确定性门闩**拒绝并回灌重提案
+   （`tests/test_answer_gate.py::test_rejected_options_card_is_retried_until_replace`，离线、不依赖模型）；
+   评审侧的提示词否决权（D6）仍保留，但**不再是唯一防线**。
 6. **意图误判修正**：优化类提问不再落 `data_query`（D7）。
 7. **不回归既有红线**：哨兵顺序与过程式输出、被拒工具名不入用户可见产物、导航/编辑建议块不回归、
    fetch 摘要仍含 `file` / `file_source` / `code_chars`。
@@ -369,6 +373,12 @@ cd JavaTutor/frontend && npx vitest run && npm run build
 **端到端取证（本计划以此取证）**：`uv run python tools/probe_concept_and_optimization.py --out probe.json`，
 确认 ① 概念题的 `critic_passed` 形状改变且上下文不再含位置块；
 ② B1→B2 序列中 `opt-step2` 返回 `replace` 而非 `options`。
+
+> **2026-09-14 复审修正（单次通过不作数）**：② 必须把同一条 B2 提问**重复 N=10 次**，10 次全为 `replace`
+> 才算通过——原判据只跑了 1 次，恰好落在成功的那 9/10 里，掩盖了 1/10 的回落。
+> 逐次的裁决与重试次数看 `decision_trace.optimize_step2_gate` / `optimize_step2_retries`（读法见
+> `docs/dev-eval-guide.md` §6）。门闩本身的行为已由离线用例固定，故 N=10 验的是「模型行为 + 门闩兜底」的合成结果，
+> 门闩失效（`violated`）也算可接受结果之一**但必须可见**，不得再被当成通过。
 
 **评估门槛**：本次改动触及作答路径（提示词/上下文）与评审 ⇒ 须在**重发 agent 后**补一轮端到端评估，
 判据沿用既有门槛（Judge 均分下降 ≤ 0.3 且 Grounding 下降 ≤ 0.5）。

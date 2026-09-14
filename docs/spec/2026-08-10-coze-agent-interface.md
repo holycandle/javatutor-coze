@@ -161,6 +161,8 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
   "revised": false,
   "revise_outcome": "skipped",
   "revise_revert_reason": "",
+  "optimize_step2_gate": "not_applicable",
+  "optimize_step2_retries": 0,
   "fallback_reason": "",
   "rag_degraded": false,
   "critic_skipped": false,
@@ -186,6 +188,8 @@ JavaTutor 的对应面板。块协议见 [2026-09-07-coze-agent-view-navigation.
 | `revised` | boolean | **修订稿是否被采纳**（2026-09-14 语义收窄：此前为「是否执行过修订」）。回退时为 `false`——用户拿到的就是原答；要看「是否触发过修订」用 `revise_outcome` |
 | `revise_outcome` | string | `accepted`（采纳）/ `reverted`（过不了验收闸，回退原答）/ `skipped`（未触发 / 调用异常 / advisory 模式） |
 | `revise_revert_reason` | string | 回退原因，未回退时 `""`：`similarity` / `nav_block` / `edit_block` / `grounding` / `recheck` |
+| `optimize_step2_gate` | string | 优化第二步的**交付形态门闩**裁决（2026-09-14 增）：`passed`（终答是合规的 `kind:"replace"` 完整代码）/ `violated`（轮次用尽仍未交付，终答形态不合规）/ `not_applicable`（本条提问不是第二步）。见 `docs/spec/2026-09-11-agent-harness-react-loop-design.md` §4.9 |
+| `optimize_step2_retries` | number | 门闩把终答打回、要求重提案的次数；`0` 表示一次过。与 `tool_rounds` **共享同一次轮次预算**，故恒 `<= 3` |
 | `fallback_reason` | string | 降级原因，未降级为空字符串 |
 | `rag_degraded` | boolean | 检索降级（跳过 RAG）时为 `true` |
 | `critic_skipped` | boolean | 评审调用失败时为 `true` |

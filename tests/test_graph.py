@@ -30,6 +30,7 @@ class TestGraphAssembly:
         assert "retrieve_knowledge" in graph.nodes
         assert "build_context" in graph.nodes
         assert "main_agent" in graph.nodes
+        assert "answer_gate" in graph.nodes
         assert "critic" in graph.nodes
         assert "revise" in graph.nodes
         assert "save_session" in graph.nodes

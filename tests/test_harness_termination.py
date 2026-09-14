@@ -1,9 +1,12 @@
 """终止性证明：图内真环一定停，且停在默认 ``recursion_limit``（25）以内。
 
-spec §4.3 的算术（每格是一步）：
-    6 个前置节点 + main_agent ≤ 4 + guard ≤ 3 + run_tools ≤ 3 + 5 个后置节点 = 21 < 25
+spec §4.3 的算术（每格是一步，``g`` = guard 进入次数、``r`` = answer_gate 重试次数，
+``g + r <= MAX_ROUNDS``）：
+    6 个前置节点 + main_agent(1+g+r) + guard g + run_tools g + answer_gate(r+1) + 5 个后置节点
+    = 13 + 3g + 2r ≤ **22** < 25
 
-``tool_rounds`` 的口径是 **guard 的进入次数**（唯一记账处），所以直接作答时为 0。
+``tool_rounds`` 的口径是「**共享**轮次预算的消耗」——`guard` 与 `answer_gate` 在各自
+「非放行即回灌」的分支上都记一笔；直接作答时为 0。
 收束轮（``tool_rounds >= MAX_ROUNDS``）永不产出 Action——终止由结构保证，不靠提示词祈愿。
 """
 
@@ -14,6 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from graphs.javatutor.graph import build_flow_graph
 from graphs.javatutor.harness.guard import MAX_ROUNDS
 from graphs.javatutor.harness.propose import CONVERGENCE_PREFIX
+from graphs.javatutor.prompting.optimization import STEP2_MARKER
 from graphs.javatutor.prompts import (
     SYSTEM_PROMPT_ANALYZE,
     SYSTEM_PROMPT_CRITIC,
@@ -23,6 +27,11 @@ from graphs.javatutor.prompts import (
 
 STEP_FACTS_JSON = '{"tool": "step_facts", "args": {"step_index": 1}}'
 UNKNOWN_TOOL_JSON = '{"tool": "no_such_tool", "args": {}}'
+# 第二步提问下最坏的那一种终答：方案卡（门闩会拒绝并回灌）
+OPTIONS_ANSWER = (
+    "请选择你要优化的方向。\n【编辑建议】\n"
+    '{"kind":"options","target":"A.java","options":[{"goal":"performance","label":"以性能为先"}]}'
+)
 
 
 class SpamModel:
@@ -75,11 +84,27 @@ def _run(payload_over=None):
 
 
 def test_budget_arithmetic_fits_default_recursion_limit():
-    """把 spec §4.3 的算术钉在测试里：改 MAX_ROUNDS 先看它还成不成立。"""
+    """把 spec §4.3 的算术钉在测试里：改 MAX_ROUNDS 先看它还成不成立。
+
+    `answer_gate` 与 `guard` **共享**同一个轮次预算（``g + r <= MAX_ROUNDS``），
+    所以**不能**再把各节点最大值直接相加——`6+4+3+3+4+5 = 25` 是个**不可达的假上界**
+    （取满 `guard=3` 就取不到 `answer_gate=4`），照着它改会得到「余量 0」的假警报。
+    """
     assert MAX_ROUNDS == 3
     pre_nodes, post_nodes = 6, 5
-    worst = pre_nodes + (MAX_ROUNDS + 1) + MAX_ROUNDS + MAX_ROUNDS + post_nodes
-    assert worst == 21
+
+    def hops(guard_visits: int, gate_retries: int) -> int:
+        return (
+            pre_nodes
+            + (1 + guard_visits + gate_retries)  # main_agent：首次 + 每次回环
+            + guard_visits
+            + guard_visits  # run_tools 至多与 guard 同数
+            + (gate_retries + 1)  # answer_gate：每次终答都过一次
+            + post_nodes
+        )
+
+    worst = max(hops(g, MAX_ROUNDS - g) for g in range(MAX_ROUNDS + 1))
+    assert worst == 22  # 最大在 g=3, r=0
     assert worst < 25  # LangGraph 默认 recursion_limit
 
 
@@ -158,3 +183,30 @@ def test_direct_answer_never_enters_the_loop():
     assert out.get("tool_rounds", 0) == 0
     assert not out.get("step_records")
     assert "直接回答就好" in out["answer"]
+
+
+def test_step2_options_only_model_terminates_within_budget():
+    """病态第二步模型：不管问几轮都只给方案卡。门闩的回灌必须**受预算约束**地停。
+
+    这是 spec §4.9 的回灌路径 + §4.3 的联合界的端到端守卫（不设 recursion_limit，
+    让默认值 25 真的当一次守卫）。
+    """
+    model = SpamModel(OPTIONS_ANSWER)
+    compiled = build_flow_graph().compile()
+    question = f"{STEP2_MARKER}只做「以性能为先」方向的优化。请给出优化后的完整代码。"
+    out = compiled.invoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content=json.dumps({**_payload(), "user_question": question}, ensure_ascii=False)
+                )
+            ]
+        },
+        config={"configurable": {"chat_model": model}},
+    )
+
+    assert model.main_calls == MAX_ROUNDS + 1  # 回灌 3 次后进收束轮，不再多花一跳
+    assert out["tool_rounds"] == MAX_ROUNDS  # 共享预算真的被门闩吃满，而不是溢出
+    assert out["decision_trace"]["optimize_step2_gate"] == "violated"
+    assert out["decision_trace"]["optimize_step2_retries"] == MAX_ROUNDS
+    assert out["answer"]  # 轮次用尽后仍按收束策略交付，不是空答

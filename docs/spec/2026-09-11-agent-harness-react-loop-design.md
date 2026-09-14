@@ -106,26 +106,28 @@ parse_context → context_compaction → analyze_code
   └─ continue → load_session → retrieve_knowledge → build_context
                      ┌──────────────────────┐
                      ↓                      │
-                 main_agent ──(answer)──→ critic → revise → verify → save_session → final → END
-                     │                                        ▲
-                  (action)                                    │
-                     ↓                                        │
-                   guard ──(allow)──→ run_tools ───────────────┘
-                     │                    (回 main_agent)
+                 main_agent ─(answer)─→ answer_gate ─(pass)─→ critic → revise → verify
+                     │                       │                                  │
+                  (action)                (retry：终答形态不合规)        save_session → final → END
+                     ↓                       ↑
+                   guard ──(allow)──→ run_tools ───→ 回 main_agent
                      └──(deny / needs_decision)──→ 回 main_agent
 ```
 
-新增 3 个节点：`guard`（治理，纯函数）、`run_tools`（执行，纯函数）、`verify`（客观核对，纯函数）。
-节点数 11 → 14。边：
+新增 4 个节点：`guard`（治理，纯函数）、`run_tools`（执行，纯函数）、`verify`（客观核对，纯函数）、
+`answer_gate`（终答形态门闩，纯函数；2026-09-14 追加，见 §4.9）。
+节点数 11 → 15。边：
 
 ```python
-graph.add_conditional_edges("main_agent", _route_after_propose, {"critic": "critic", "guard": "guard"})
+graph.add_conditional_edges("main_agent", _route_after_propose, {"answer_gate": "answer_gate", "guard": "guard"})
+graph.add_conditional_edges("answer_gate", _route_after_answer_gate, {"critic": "critic", "propose": "main_agent"})
 graph.add_conditional_edges("guard", _route_after_guard, {"tools": "run_tools", "propose": "main_agent"})
 graph.add_edge("run_tools", "main_agent")
 graph.add_edge("verify", "save_session")        # 原 add_edge("revise", "save_session") 顺延
 ```
 
-`_route_after_propose`：`state["answer"]` 非空 → `"critic"`；否则 → `"guard"`。
+`_route_after_propose`：本轮 `proposed_action` 非空 → `"guard"`；否则（终答）→ `"answer_gate"`。
+`_route_after_answer_gate`：裁决为 `retry` → `"propose"`；`pass` / `violated` → `"critic"`。
 `_route_after_guard`：`allow` → `"tools"`；`deny` / `needs_decision`（含 HITL 恢复后）→ `"propose"`。
 
 > **`guard` 是唯一的暂停点**：`needs_decision` 且 HITL 开启时，`guard_node` 内部调用 `interrupt()`，
@@ -134,13 +136,25 @@ graph.add_edge("verify", "save_session")        # 原 add_edge("revise", "save_s
 
 ### 4.3 轮次预算与终止性证明（**硬约束，必须由测试锁住**）
 
-- `MAX_ROUNDS = 3` 语义**保持**「最多 3 次工具执行」，由 `guard_node` 入口 `tool_rounds += 1`（沿用既有字段名，避免状态重命名）。
+- `MAX_ROUNDS = 3` 语义为「主 Agent 的**轮次预算**」= 最多 3 次工具执行（`guard_node` 入口 `tool_rounds += 1`）
+  **加上**最多 3 次终答返修（`answer_gate_node` 的 `retry` 分支同样 `+1`，见 §4.9）。
+  沿用既有字段名 `tool_rounds`，避免状态重命名；但它记的是**共享预算的消耗**，不再是「工具执行次数」的别名。
 - **收束轮不占用工具轮次**：`main_agent` 读到 `tool_rounds >= MAX_ROUNDS` 时进入**收束模式**（见 §4.4），
   该模式下**永不产出 `Action`**，因此「图一定终止」由结构保证，而不是靠提示词祈愿。
 - 终止性证明（每次 `main_agent` 访问必消耗一个轮次或直接进入终结）：
-  - `main_agent` 首次访问 `tool_rounds = 0`；此后每次回到 `main_agent` 都必然经过一次 `guard`，而 `guard` 必 `+1`。
-  - 故 `main_agent` 访问次数 ≤ `MAX_ROUNDS + 1 = 4`（第 4 次即收束轮）；`guard` ≤ 3；`run_tools` ≤ 3。
-  - 前缀 6 + `main_agent` 4 + `guard` 3 + `run_tools` 3 + 后缀 5 = **21**，低于 LangGraph 默认 `recursion_limit=25`（余量 4）。
+  - `main_agent` 首次访问 `tool_rounds = 0`；此后每次回到 `main_agent` 都必然经过 `guard` 或
+    `answer_gate`，而这两个节点在各自「非放行即回灌」的分支上**都必 `+1`**。
+  - 故 `main_agent` 访问次数 ≤ `MAX_ROUNDS + 1 = 4`（第 4 次即收束轮）。
+  - 记 `g` = `guard` 访问次数、`r` = `answer_gate` 的重试次数，则 `g + r ≤ MAX_ROUNDS = 3`
+    （同一预算是**共享**的，不是各自独立）；`run_tools` ≤ `g`、`answer_gate` 访问次数 = `r + 1`
+    （每次终答都要过一次门闩，最后一次是判定的那次）。
+  - 前缀 6 + `main_agent`(1+g+r) + `guard` g + `run_tools` g + `answer_gate`(r+1) + 后缀 5
+    = **13 + 3g + 2r**，在 `g + r ≤ 3` 下取值 20…**22**（最大在 `g=3, r=0`），
+    低于 LangGraph 默认 `recursion_limit=25`（余量 ≥ 3）。
+  - ⚠ **不要把各节点最大值直接相加**：`4 + 3 + 3 + 4 + 5 + 6 = 25` 这种「朴素上界」在加入
+    `answer_gate` 后**不再可达**——`guard` 与 `answer_gate` 访问次数之和受同一预算约束，
+    取满 `guard=3` 就取不到 `answer_gate=4`（反之亦然）。测试里必须按上面这条**联合界**写，
+    否则会把一个永远到不了的 25 当成上界，得到「余量 0」的假警报。
   - 无需自环边、无需额外标志位：收束模式由 `tool_rounds` 直接判定（这也让「为什么第 4 次不能调工具」在图上是可读的）。
 - **`recursion_limit` 现状**：仅 `/async_run` 显式设置，`/run`、`/stream_run` 走默认值——属外壳，本次不改，
   已列入 §6 外壳请求清单（建议显式设 40 并把本预算写进注释）。
@@ -241,6 +255,43 @@ TOOLS = {
 - 代价：单轮上下文随轮次线性增长（最多 4 轮）。当前 `context_built` 本身是主要体量，
   多出的三份观察均为已渲染的紧凑文本，**可接受**；不引入截断（截断会重新引入「模型看不到自己上一轮」的问题）。
 
+### 4.9 终答形态门闩（`answer_gate`，原则⑤的第二个落点）
+
+来源：`docs/reviews/2026-09-14-optimization-step2-marker-nondeterminism-review.md`。
+优化第二步（提问以 `【优化第二步】` 起头）要求终答里出现 `kind:"replace"` 的【编辑建议】块，
+但原来的唯一约束是系统提示里的一段自然语言加一条 few-shot——**模型可违背**，
+线上实测同一提问 10 次里 1 次回落成 `options` 方案卡（用户可见症状：反复让用户选方向）。
+
+> **原则**：交付形态的判据必须做成**代码**，不能交给模型自证。这与 §4.7 的 grounding 核对同源，
+> 但**分工不同**：§4.7 只写 `verification`、**不参与路由**；本节的门闩**参与路由**（不合规就退回重提案）。
+
+- **新增节点 `answer_gate`**，位置在 `main_agent` 的终答分支与 `critic` 之间；纯函数，不调 LLM、不做 IO。
+- **判据（纯字符串/JSON，不看模型）**：`harness/answer_gate.py::check_step2_answer(user_question, answer)`。
+  - 适用范围：`user_question`（`lstrip` 后）以 `STEP2_MARKER`（`【优化第二步】`，从
+    `prompting/optimization.py` **导入**，不落第三份字面量）起头。其余提问一律 `not_applicable`（直接放行）。
+  - 合规定义：终答里**恰好一个**【编辑建议】块，且 `kind == "replace"`、`code` 非空字符串、
+    `code` 不含 `...` 占位、不含 `options` 字段。
+  - **块 JSON 必须平衡解析**（`json.JSONDecoder().raw_decode`）：Java 代码里有 `{`/`}`，
+    非贪婪正则会在第一个嵌套 `}` 处截断，把合规的 `replace` 误判成违规（既有 `_strip_leaked_json` 同法）。
+- **不过怎么办**：拒绝该终答（清空 `answer`），把一条错误观察渲染成 `HumanMessage` 回灌给模型
+  （「第二步必须交付 `replace` 完整代码，你给的是 `options`；不要再让用户选方向」），
+  并由 `answer_gate` **消耗一次共享轮次预算**（`tool_rounds += 1`，与 `guard` 同记一笔），
+  路由回 `main_agent` 重提案。
+  - **绝不把被拒的终答写进 `agent_messages`**：`propose` 的 Bug A 教训（见
+    `docs/devlog/2026-09-14-fix-fetch-context-and-duplicate-answer.md`）——终答轮写进
+    `agent_messages` 的 `AIMessage` 会随 `stream_mode="messages"` 转成 `answer` delta，
+    与 `build_final` 的终答在前端纯累加，表现为「正文重复两遍」。回灌通道是 `HumanMessage`。
+  - **收束轮之后不再重试**：`tool_rounds >= MAX_ROUNDS` 时（收束模式永不产出 Action，
+    重试已无意义）门闩直接记为 `violated`，按收束文案交付，不再多花一跳。
+- **记痕**：`decision_trace` 新增两键——`optimize_step2_gate`（`"passed"` | `"violated"` |
+  `"not_applicable"`）与 `optimize_step2_retries`（门闩回灌次数），使「有没有兜住」可度量。
+  `state` 只有一个新键 `answer_gate_decision`（`{"verdict", "reason", "retries"}`，
+  与 `guard_decision` 同形），痕迹两键由它派生，不另存一份。
+- **不做**（与 review §3.1 一致）：不改前端标记、不改【编辑建议】块协议、不改两步式的产品形态；
+  也**不**把「候选返修形状」（提问含「上一版优化代码没有通过…」）纳入门闩——该形状下
+  `prompting/optimization.py` 明确允许「只给正文说明原因、不给 replace 块」，
+  强行要求 `replace` 会把一条合法的拒绝变成违规。
+
 ## 5. 影响面
 
 ### 5.1 必须改变的行为（有意为之）
@@ -251,8 +302,9 @@ TOOLS = {
 | `args` 非 dict / 未知键 | 静默 `{}` / 工具内抛 `TypeError` 被捕获 | `invalid_args` / `deny`，门闩层就拦住 | P2，原则② |
 | 轮次耗尽 | 兜底道歉，丢弃全部证据 | 收束轮，保住并交付已得证据 | §4.4，原则⑥ |
 | 模型可见的对话 | 每轮仅 `[System, Human(context+轮次)]` | 累积的 `System/Human/AI/Human...` 真轨迹 | §4.8，原则⑦ |
-| `decision_trace` | 无 `verification` | 新增 `verification` | §4.7，原则⑤ |
-| 图节点数 | 11（无环） | 14（含 1 个环） | §4.2 |
+| `decision_trace` | 无 `verification` | 新增 `verification` 与 `optimize_step2_gate` / `optimize_step2_retries` | §4.7 + §4.9，原则⑤ |
+| 第二步交付形态 | 只靠提示词条款 + few-shot 约束，模型偶发违背（线上 1/10 回落方案卡） | `answer_gate` 确定性判定，不合规回灌重提案 | §4.9，原则⑤ |
+| 图节点数 | 11（无环） | 15（含 1 个环） | §4.2 |
 | 显式 `fetch` 失败后的评审 | `fetch_context_failed` 落不进 state → `critic` **照常跑** | `fetch_context_failed` 落进 state → 无 steps 时 `critic_skipped=True` | 本节补记 |
 
 > 最后一行是**执行后补记**（2026-09-11）：本条原列在 §5.2 的回归红线里，由 review 的 P1-1 指出
@@ -300,9 +352,14 @@ TOOLS = {
 
 ## 7. 验收标准
 
-- 图结构：`guard`/`run_tools`/`verify` 在 `graph.nodes` 中；存在环边 `("run_tools","main_agent")`；`analyze` 短路不变。
+- 图结构：`guard`/`run_tools`/`verify`/`answer_gate` 在 `graph.nodes` 中；存在环边 `("run_tools","main_agent")`
+  与回提案边 `("answer_gate" → "main_agent")`；`analyze` 短路不变。
 - 病态模型（连续 10 次都提工具调用）跑完整图：**不出现 `GraphRecursionError`**，`tool_rounds == 3`，
   `answer` 非空且**不含**工具 JSON（收束轮兜底生效）。
+- 病态模型（第二步提问下**永远**只给 `options`）跑完整图：不出现 `GraphRecursionError`，
+  终态 `decision_trace["optimize_step2_gate"] == "violated"` 且 `optimize_step2_retries >= 1`（回灌确实发生过）。
+- 交付形态门闩：第二步提问 + 合规 `replace` 终答 → `answer_gate` 放行（`passed`，`retries == 0`）；
+  非第二步提问 → `not_applicable` 且**不改动** `answer`；门闩在 `tool_rounds >= MAX_ROUNDS` 时不再回灌。
 - 未知工具 / 非法参数：得到 `deny` / `invalid_args` 观察（`step_records` 可查），**不抛异常**，`tool_calls` 不含被拒工具。
 - HITL 离线：`MemorySaver` 编译图 → 触发 `needs_decision` → 返回 `__interrupt__`（含可选项）→
   `Command(resume="<文件名>")` 后正常收敛，且恢复后的观察携带用户选择。

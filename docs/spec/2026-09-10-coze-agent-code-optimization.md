@@ -121,6 +121,24 @@
 - 若用户提问已含明确目标（「帮我优化性能」）但**不带 `【优化第二步】` 标记**，agent **仍先出方案卡**
   （只给该目标一项或两项），保持交互一致——判别只看标记，不看措辞。
 
+**第二步的交付形态由确定性门闩兜底（2026-09-14 追加，改 `src/graphs/javatutor`）**
+
+判别器把「第二步」从猜测变成了判定，但**判别之后**「必须交付 `replace`」这条要求原先只落在
+系统提示的一段自然语言 + 一条 few-shot 上——**模型可违背**。线上实测：同一字面第二步提问连测 10 次，
+1 次回落成 `options` 方案卡（用户可见症状 = 「还是让我选方向、一行代码都没有」）。
+⇒ 判据不能交给模型自证，与评审链路（`critic` 的四道验收闸）同源，改由**代码**判定。
+
+- **门闩位置**：图节点 `answer_gate`（`harness/answer_gate.py`），在终答落 `critic` **之前**；
+  纯函数、不调 LLM。详见 `docs/spec/2026-09-11-agent-harness-react-loop-design.md` §4.9。
+- **判据**：提问以 `STEP2_MARKER` 起头时，终答必须**恰好一个**【编辑建议】块且
+  `kind == "replace"`、`code` 非空、无 `...` 占位、无 `options` 字段；否则视为违规。
+- **违规处置**：拒绝该终答 → 回灌一条错误观察（「第二步必须交付 `replace` 完整代码」）→
+  回 `main_agent` 重提案，**消耗同一次轮次预算**（§4.3 的 3 轮共享），轮次用尽则记 `violated` 并交付。
+- **可观测**：`decision_trace` 增 `optimize_step2_gate`（`passed` / `violated` / `not_applicable`）
+  与 `optimize_step2_retries`。
+- **不变**：门闩不改提问、不改【编辑建议】块协议、不改两步式的产品形态；也不覆盖「候选返修」的
+  正文说明形态（那一形态下允许不给 `replace`，见 coze 侧提示词的返修条款）。
+
 ### 4.4 `goal` 闭集与点击 prompt
 
 闭集（`goal` 合法取值 / 前端规范名）：
@@ -344,6 +362,10 @@
 2. 在方案卡上勾选（可多选）后提交 → 前端发出模板提问（可在消息列表看到，**以 `【优化第二步】` 起头**，含「只做…」+「不要顺带做其他方向的改动（例如：…）」），
    第 2 轮回答附 `kind:"replace"` 块，且**代码里只含所选方向的改动**（未选方向即便明显可优化也不得顺手改）；
    **第 2 轮不得再出 `options` 方案卡**（重复出卡 = 用户反复选择的死循环）。
+   **判据（2026-09-14 修正）**：单次通过**不足以判过**——它是间歇性失效（线上 10 次里 1 次回落），
+   单次观测没有分辨力。改为：**同一提问连测 N=10，全部为 `replace`**；
+   且离线必须有门闩的**失败回灌用例**（FakeModel 故意产 `options` → 被拒 → 回灌后改产 `replace`）
+   与**耗尽用例**（一直产 `options` → `optimize_step2_gate == "violated"` 且不超轮次预算）在绿。
 3. **门禁**：候选跑不通 → 卡片显示错误、「应用」禁用；跑通 → 「应用」可用。
    失败后若该卡挂在**最新一条 assistant 消息**上，前端**自动返修**（最多 2 次额外生成、原地替换卡片、自动重跑门禁）；
    耗尽 / 非最新 / 传输失败 → 回到上面的现状行为（详见 §6.2）。
@@ -368,6 +390,13 @@
   **第二步 few-shot 提问必须以该标记起头**、旧判别依据那条冲突条目已消失、
   候选返修段与前端 `buildRetryPrompt` 的两个标记**互为字面包含** → `tests/test_optimization_guidance.py`）；
   运行模式守卫（payload → state → packet → facts 块 → 引导 → 本体 → `tests/test_run_mode_context.py`）。
+  **确定性门闩（2026-09-14 追加）** → `tests/test_answer_gate.py`：纯判据（合规 `replace` / `options` /
+  两个块 / `kind` 缺失 / `code` 空 / `code` 含 `...` 五种违规形状 / 非标记提问 `not_applicable`）、
+  节点分支（放行不改 `answer`、回灌写 `HumanMessage` 且**不写** `answer`、预算耗尽不再回灌）、
+  图级病态模型（一直产 `options` → 不 `GraphRecursionError`、`optimize_step2_gate == "violated"`）、
+  **端到端产物断言**（`build_final` 的 `answer` 文本里确实含 `optimize_step2_gate`，不止断言 trace 字典）、
+  终止性算术（`tests/test_harness_termination.py` 按 §4.3 的**联合界**改）；
+  意图守卫（第二步标记不得被 `conservative_intent` 判成 `data_query` → `tests/test_intent_rules.py`）。
 - **手验**：`npm run dev` 跑验收 1–8（含报错预填与多文件）；逐条清单见两份 2026-09-12 devlog。
 
 ## 10. 风险 / 待确认
@@ -382,6 +411,13 @@
 - **`lastRunError` 的生命周期**（何时清）：**已定**——下次成功运行（`runCode`/`runProject` 开头置 `store.error = null`）或用户点 `×`（`clearRunError()`）时清。
 - **方向约束是「提示层」而非「校验层」**：`comprehensive` 不校验代码真的只改了所列方向，只是把「多方向」记进 `replace.goal` 供展示与统计；
   真要强校验只能靠人工/评测（可观测性妥协，已接受）。
+- **判别器是确定的，但「模型是否遵守」只有概率**（2026-09-14 追加，已确认为真实故障）：
+  标记判别器把「走哪条分支」变成了确定的事，但「遵守该分支的交付形态」仍靠提示词，
+  实测同一提问 10 次里 1 次违背。⇒ 交付形态由 `answer_gate` 兜底（§4.3）；
+  兜底后的残余风险 = **连 N 次都违背**（概率随重试次数指数下降，但非零），
+  由 `optimize_step2_gate == "violated"` 在痕迹里显式暴露，不再静默。
+  门闩的判据只看**形态**（`kind`/`code` 完整性），不看**语义**（代码是否真的只改了所选方向）——
+  形态可判、语义不可判，后者仍属「提示层」。
 - **黑名单范围可控**：只列**同一张方案卡**的未勾选项。若日后出现「未选项里混入荒谬条目（如把明显 bug 归入某方向）」，再考虑只列 `label` 不列 `detail`。
 - **HITL 对接点**：`option` 结构 `{goal,label,detail}` + 前端 prompt 模板需保持稳定，供 harness 以「用户选项」直接复用。
 
@@ -406,3 +442,10 @@
     §8（验收 2）/ §9（跨仓握手断言）/ §10（风险行）。
   - **评审-修订子系统优化** — 设计 `docs/spec/2026-09-14-critic-revise-optimization-design.md`
     / 计划 `docs/plan/2026-09-14-critic-revise-optimization-plan.md`（`replace` 的评审否决权收窄，即上条的评审侧实现）。
+- 2026-09-14（第二步交付形态兜底，由上述审查触发）：
+  - **确定性门闩** — 审查 `docs/reviews/2026-09-14-optimization-step2-marker-nondeterminism-review.md`
+    / 计划 `docs/plan/2026-09-14-optimization-step2-delivery-gate-plan.md`
+    / 记录 `docs/devlog/2026-09-14-optimization-step2-delivery-gate.md`。
+    本 spec 同步 §4.3（门闩条款）/ §8（验收 2 改 N=10 + 回灌用例）/ §9（`tests/test_answer_gate.py`）/
+    §10（判别器概率性）；harness 侧同步 `docs/spec/2026-09-11-agent-harness-react-loop-design.md`
+    §4.2（拓扑）/ §4.3（**预算联合界改 22**）/ §4.9（新增）/ §5.1 / §7。

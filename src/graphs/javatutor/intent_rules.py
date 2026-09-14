@@ -2,6 +2,8 @@
 
 import re
 
+from graphs.javatutor.prompting.optimization import STEP2_MARKER
+
 VALID_INTENTS = {"data_query", "concept", "debug", "other"}
 
 DEBUG_KEYWORDS = ["报错", "编译", "异常", "错误", "怎么改", "修复", "exception", "nullpointer", "越界"]
@@ -36,6 +38,14 @@ def conservative_intent(user_question: str, compile_error: str = "") -> str:
     q = (user_question or "").lower()
     if _hits(q, DEBUG_KEYWORDS):
         return "debug"
+    # 优化第二步（提问以 `【优化第二步】` 起头）必须挡在关键词分支**之前**：
+    # 提问的黑名单文案由模板拼出，必含「命名中间变量」「改进变量命名」这类字样，
+    # 而 DATA_QUERY_KEYWORDS 含「变量」⇒ 必命中。判成 data_query 的代价不只是痕迹记错：
+    # build_context_node 会据此注入 data_query 的角色与输出契约（「在哪一步、哪一行、哪个变量，
+    # 长度 3-6 句」），与「交付整份 replace 代码」直接竞争。
+    # 归 other 而非 concept：本类提问没有专属角色段，other 的引导（「按问题本身作答即可」）无害。
+    if (user_question or "").lstrip().startswith(STEP2_MARKER):
+        return "other"
     if _hits(q, DATA_QUERY_KEYWORDS) or _STEP_LINE_REF.search(q):
         return "data_query"
     if _hits(q, CONCEPT_KEYWORDS):

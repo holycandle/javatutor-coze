@@ -219,6 +219,13 @@ class JavaTutorState(TypedDict, total=False):
     guard_decision: dict
     """最近一次门闩裁决（verdict / policy / reason / options）。"""
 
+    answer_gate_decision: dict
+    """最近一次终答形态门闩裁决（``verdict`` / ``reason`` / ``retries``）。
+
+    ``verdict`` 取值 ``passed`` | ``violated`` | ``not_applicable`` | ``retry``；最后一个是**瞬态**
+    （回提案节点重出终答），终态只会是前三者之一（spec §4.9）。
+    决策痕迹的 ``optimize_step2_gate`` / ``optimize_step2_retries`` 由本字段派生，不另存一份。"""
+
     step_records: list
     """逐动作的 Observation 记录（原则⑦的 StepRecord），供决策痕迹、评测与 B 端可观测。"""
 

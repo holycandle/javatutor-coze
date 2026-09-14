@@ -64,7 +64,7 @@ uv run python tools/eval_cli.py --round-dir eval/archive/2026-08-17/round-1 expo
 
 每轮目录 `eval/archive/<date>/round-<n>/`：
 
-- `answers.jsonl`：`id`、`answer`、`latency`、`decision_trace`（含 `tool_calls`、`token_usage`、`sources`、`latency_ms`、`retrieval`、`reasoning`）。
+- `answers.jsonl`：`id`、`answer`、`latency`、`decision_trace`（含 `tool_calls`、`token_usage`、`sources`、`latency_ms`、`retrieval`、`reasoning`、`optimize_step2_gate`、`optimize_step2_retries`）。
 - `judged.jsonl`：`id`、`score`、`judgement`、`scores.{relevance,grounding,pollution,correctness}`、`reason`、`raw_judge_output`、`attempts`、`judge_fallback`、`empty_output`、`error`。
 - `summary.json`：`e2e` 汇总（含四档检索指标与 `retrieval_total`）与 `diff_vs_previous`。
 - `human_review.jsonl`：执行 `review` 后生成。
@@ -143,6 +143,25 @@ uv run python tools/critic_audit.py eval/archive --json           # 机器可读
 判读要点：`precision` 低 = 误杀（Judge 判 `correct` 却被拦），是本子系统的主要故障模式；
 `recall` 低 = 漏拦。归档四轮（截至 round-4）为 precision 22/33 = 66.7%、recall 10/22 = 45.5%，
 即每 3 条被拦里有 1 条是 Judge 眼里的正确答案。
+
+### 交付形态门闩怎么看（2026-09-14 增）
+
+优化第二步（提问以 `【优化第二步】` 起头）的**交付形态**由确定性门闩裁决，两个键进 `decision_trace`：
+
+- `optimize_step2_gate`：`passed` / `violated` / `not_applicable`（非第二步提问）。
+- `optimize_step2_retries`：终答被打回重提案的次数，一次过为 `0`。
+
+判读要点：**`violated` 是唯一表示「用户拿到的不是整份代码」的取值**——线上它意味着模型
+在轮次用尽后仍只给了方案卡，用户看到的是「还要再选一次方向」。`not_applicable` 不是故障，
+它出现在所有非第二步提问上，故**不能拿全量样本算「合规率」**，分母只取 `not_applicable` 以外的样本。
+
+```bash
+# 逐条打印门闩裁决与重试次数（非第二步样本会是 not_applicable / 0）
+uv run python -c "import json;from pathlib import Path;p=Path('eval/archive/2026-09-14/round-1/answers.jsonl');rows=[json.loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()];[print(r.get('id'), r['decision_trace'].get('optimize_step2_gate'), r['decision_trace'].get('optimize_step2_retries')) for r in rows]"
+```
+
+注意：这个门闩只在**终答**上判形态，不看语义（不像 critic 那样核对数字），所以它拦下的样本
+`optimize_step2_gate == "violated"` 与 critic 的 `critic_passed` 无关，两者不要混算。
 
 ### 检索
 

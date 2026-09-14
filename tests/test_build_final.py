@@ -331,3 +331,30 @@ def test_trace_tolerates_bad_critic_feedback():
     """`critic_feedback` 是 LLM 出的字符串，坏 JSON 不得让 build_final 崩。"""
     trace = build_final(_debug_state(critic_feedback="{ 不是 JSON"))["decision_trace"]
     assert trace["critic_issues"] == []
+
+
+def test_trace_step2_gate_defaults_are_stable():
+    """没跑过门闩时两键取稳定缺省（消费方不会取到 None）——
+    `not_applicable` / `0` 与「跑过且放行」的 `passed` 是**不同**的事实，不能混。"""
+    out = build_final(
+        {
+            "answer": "第 2 步（第 4 行）arr[1] 变成了 5",
+            "intent": "data_query",
+            "retrieved_chunks": [],
+        }
+    )
+    assert out["decision_trace"]["optimize_step2_gate"] == "not_applicable"
+    assert out["decision_trace"]["optimize_step2_retries"] == 0
+
+
+def test_trace_exposes_answer_gate_decision():
+    out = build_final(
+        {
+            "answer": "正文",
+            "intent": "other",
+            "retrieved_chunks": [],
+            "answer_gate_decision": {"verdict": "violated", "reason": "块里带了 options", "retries": 2},
+        }
+    )
+    assert out["decision_trace"]["optimize_step2_gate"] == "violated"
+    assert out["decision_trace"]["optimize_step2_retries"] == 2
